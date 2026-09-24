@@ -19,7 +19,7 @@ static void require(bool ok, const QString &message) {
     }
 }
 
-static void near(double actual, double expected, const QString &message) {
+static void requireNear(double actual, double expected, const QString &message) {
     require(std::isfinite(actual) && std::abs(actual-expected) < 1e-10,
             message + QString(" (actual %1, expected %2)").arg(actual,0,'g',15).arg(expected,0,'g',15));
 }
@@ -45,12 +45,12 @@ static QString atoms() {
 }
 
 static void checkCell(Crystal &crystal) {
-    near(crystal.getLatticeA(), 5.431, "CIF uncertainty must not change central value");
-    near(crystal.getLatticeB(), 6.4, "b changed");
-    near(crystal.getLatticeC(), 7.2, "c changed");
-    near(crystal.getLatticeAlpha(), 78*M_PI/180, "alpha changed");
-    near(crystal.getLatticeBeta(), 101*M_PI/180, "beta changed");
-    near(crystal.getLatticeGamma(), 113*M_PI/180, "gamma changed");
+    requireNear(crystal.getLatticeA(), 5.431, "CIF uncertainty must not change central value");
+    requireNear(crystal.getLatticeB(), 6.4, "b changed");
+    requireNear(crystal.getLatticeC(), 7.2, "c changed");
+    requireNear(crystal.getLatticeAlpha(), 78*M_PI/180, "alpha changed");
+    requireNear(crystal.getLatticeBeta(), 101*M_PI/180, "beta changed");
+    requireNear(crystal.getLatticeGamma(), 113*M_PI/180, "gamma changed");
     const double a=5.431, b=6.4, c=7.2;
     Matrix metric(a*a, a*b*cos(113*M_PI/180), a*c*cos(101*M_PI/180),
                   a*b*cos(113*M_PI/180), b*b, b*c*cos(78*M_PI/180),
@@ -58,10 +58,10 @@ static void checkCell(Crystal &crystal) {
     Matrix reciprocal = crystal.getB();
     Matrix identity = reciprocal.transpose() * reciprocal * metric;
     for(int i=0; i<3; ++i) for(int j=0; j<3; ++j)
-        near(identity.Get(i,j), i==j ? 1 : 0, "Reciprocal metric is inconsistent with imported cell");
+        requireNear(identity.Get(i,j), i==j ? 1 : 0, "Reciprocal metric is inconsistent with imported cell");
     identity = crystal.getB() * crystal.getBinv();
     for(int i=0; i<3; ++i) for(int j=0; j<3; ++j)
-        near(identity.Get(i,j), i==j ? 1 : 0, "B inverse is incorrect");
+        requireNear(identity.Get(i,j), i==j ? 1 : 0, "B inverse is incorrect");
 }
 
 static void importViaDialog(CrystalDialog &dialog, const QString &path,
@@ -108,8 +108,8 @@ static void checkCif(const QTemporaryDir &directory) {
     checkCell(parsed);
     require(parsed.getNRootAtoms()==2, "Atom loop not loaded");
     require(parsed.getAtom(0)->getZ()==1 && parsed.getAtom(1)->getZ()==8, "Elements changed");
-    near(parsed.getAtom(0)->getXPos(), -0.125, "Negative fractional coordinate changed");
-    near(parsed.getAtom(0)->getYPos(), 1.25, "Fractional coordinate over one changed");
+    requireNear(parsed.getAtom(0)->getXPos(), -0.125, "Negative fractional coordinate changed");
+    requireNear(parsed.getAtom(0)->getYPos(), 1.25, "Fractional coordinate over one changed");
     require(parsed.getNAtoms()==2, "P1 added periodic copies of the source atoms");
     require(QString::fromUtf8(parsed.getName())=="Imported crystal\nfrom CIF", "Multiline name lost");
 
@@ -119,7 +119,7 @@ static void checkCif(const QTemporaryDir &directory) {
     original.setName("Original crystal");
     dialog.setCrystal(&original);
     importViaDialog(dialog, writeCif(directory, source));
-    near(original.getLatticeA(), 5.4, "Import changed live crystal before OK");
+    requireNear(original.getLatticeA(), 5.4, "Import changed live crystal before OK");
     const QString screenshot = qEnvironmentVariable("QLAUE_TEST_SCREENSHOT");
     if(!screenshot.isEmpty()) {
         dialog.show();
@@ -132,8 +132,8 @@ static void checkCif(const QTemporaryDir &directory) {
     dialog.getCrystal(&roundTrip);
     checkCell(roundTrip);
     require(roundTrip.getNRootAtoms()==2 && roundTrip.getAtom(0)->getZ()==1, "Hydrogen lost in dialog");
-    near(roundTrip.getAtom(0)->getXPos(), -0.125, "Dialog changed negative fractional x");
-    near(roundTrip.getAtom(0)->getYPos(), 1.25, "Dialog changed fractional y over one");
+    requireNear(roundTrip.getAtom(0)->getXPos(), -0.125, "Dialog changed negative fractional x");
+    requireNear(roundTrip.getAtom(0)->getYPos(), 1.25, "Dialog changed fractional y over one");
     importViaDialog(dialog, directory.filePath("anything.CIF"), true);
     dialog.getCrystal(&roundTrip);
     checkCell(roundTrip);
@@ -151,7 +151,7 @@ static void checkCif(const QTemporaryDir &directory) {
     require(parsed.getNAtoms()==4, "Symmetry did not generate four general positions");
     dialog.setCrystal(&parsed);
     dialog.getCrystal(&roundTrip);
-    near(roundTrip.getLatticeBeta(), 102*M_PI/180, "Dialog reset monoclinic beta");
+    requireNear(roundTrip.getLatticeBeta(), 102*M_PI/180, "Dialog reset monoclinic beta");
     require(roundTrip.getNRootAtoms()==1, "Repeated import retained old atoms");
 
     const QString trigonal = "data_trigonal\n_cell_length_a 5\n_cell_length_b 5\n_cell_length_c 7\n"
@@ -170,7 +170,7 @@ static void checkCif(const QTemporaryDir &directory) {
     require(found1 && found2,"Trigonal symmetry rotation was transposed");
     dialog.setCrystal(&parsed);
     dialog.getCrystal(&roundTrip);
-    near(roundTrip.getLatticeGamma(),120*M_PI/180,"Dialog lost trigonal cell angle");
+    requireNear(roundTrip.getLatticeGamma(),120*M_PI/180,"Dialog lost trigonal cell angle");
 
     const QString rhombohedral = "data_rhombohedral\n_cell_length_a 5\n_cell_length_b 5\n_cell_length_c 5\n"
         "_cell_angle_alpha 75\n_cell_angle_beta 75\n_cell_angle_gamma 75\n_space_group_name_H-M_alt 'R 3'\n";
@@ -249,7 +249,7 @@ static void checkCif(const QTemporaryDir &directory) {
     dialog.setCrystal(&original);
     importViaDialog(dialog, writeCif(directory, source));
     dialog.reject();
-    near(original.getLatticeA(),5.4,"Dialog cancel changed original crystal");
+    requireNear(original.getLatticeA(),5.4,"Dialog cancel changed original crystal");
     require(QString(original.getName())=="Original crystal", "Cancel changed crystal name");
     qInfo() << "PASS: CIF parsing, symmetry, triclinic metric, atom tables, dialog import/cancel/errors";
 }
@@ -278,9 +278,9 @@ static void checkSourceCoordinates(const QTemporaryDir &directory) {
         for(int row=0; row<5; ++row) {
             Atom *atom = crystal.getAtom(row);
             require(atom->getZ()==elements[row], "Reported CIF element changed");
-            near(atom->getXPos(),positions[row][0],QString("CIF site %1 x changed").arg(row+1));
-            near(atom->getYPos(),positions[row][1],QString("CIF site %1 y changed").arg(row+1));
-            near(atom->getZPos(),positions[row][2],QString("CIF site %1 z changed").arg(row+1));
+            requireNear(atom->getXPos(),positions[row][0],QString("CIF site %1 x changed").arg(row+1));
+            requireNear(atom->getYPos(),positions[row][1],QString("CIF site %1 y changed").arg(row+1));
+            requireNear(atom->getZPos(),positions[row][2],QString("CIF site %1 z changed").arg(row+1));
         }
         // Independently cross-checked using Gemmi 0.7.5 with the original CIF.
         require(crystal.getNAtoms()==24, "Incorrect P6322 expansion of the reported CIF");
@@ -298,7 +298,7 @@ static void checkSourceCoordinates(const QTemporaryDir &directory) {
     QTableWidget *table = dialog.findChild<QTableWidget *>("AtomsTable");
     require(table != nullptr,"Atom table is missing");
     for(int row=0; row<5; ++row) for(int column=0; column<3; ++column)
-        near(table->item(row,column+1)->text().toDouble(),positions[row][column],
+        requireNear(table->item(row,column+1)->text().toDouble(),positions[row][column],
              "Set Lattice display differs from source coordinates");
     const QString screenshot = qEnvironmentVariable("QLAUE_COORDINATE_SCREENSHOT");
     if(!screenshot.isEmpty()) {
@@ -328,7 +328,7 @@ static void checkSourceCoordinates(const QTemporaryDir &directory) {
             before += double(parsed.getAtom(i)->getZ()) * parsed.getAtom(i)->getPhase(h,k,l);
             after += double(translated.getAtom(i)->getZ()) * translated.getAtom(i)->getPhase(h,k,l);
         }
-        near(std::abs(before-after),0,"Cell translations changed atomic phases");
+        requireNear(std::abs(before-after),0,"Cell translations changed atomic phases");
     }
     qInfo() << "PASS: all 15 reported CIF coordinates survive import, display and repeated apply; 24 symmetry sites and periodic phases";
 }
@@ -347,9 +347,9 @@ static void calculate(LaueFilm *film, const std::function<void()> &action) {
 static void checkRotation() {
     Crystal initial;
     require(initial.getFreeRotate(),"Default rotation mode is not initialized");
-    near(initial.getGonioX(),0,"Initial X angle is not zero");
-    near(initial.getGonioY(),0,"Initial Y angle is not zero");
-    near(initial.getGonioZ(),0,"Initial Z angle is not zero");
+    requireNear(initial.getGonioX(),0,"Initial X angle is not zero");
+    requireNear(initial.getGonioY(),0,"Initial Y angle is not zero");
+    requireNear(initial.getGonioZ(),0,"Initial Z angle is not zero");
     initial.setFreeRotate(false);
     initial.rotateBy(0.1,0.2,0.3);
     initial.setName("Rotation copy test");
@@ -357,9 +357,9 @@ static void checkRotation() {
     assigned=initial;
     for(Crystal *c : {&copied,&assigned}) {
         require(!c->getFreeRotate(),"Copy lost rotation mode");
-        near(c->getGonioX(),0.1,"Copy lost X angle");
-        near(c->getGonioY(),0.2,"Copy lost Y angle");
-        near(c->getGonioZ(),0.3,"Copy lost Z angle");
+        requireNear(c->getGonioX(),0.1,"Copy lost X angle");
+        requireNear(c->getGonioY(),0.2,"Copy lost Y angle");
+        requireNear(c->getGonioZ(),0.3,"Copy lost Z angle");
         c->setName(c->getName());
         require(QString(c->getName())=="Rotation copy test","Aliased name replacement failed");
     }
@@ -384,16 +384,16 @@ static void checkRotation() {
                 Matrix u=crystal->getU();
                 int first=(axis+1)%3, second=(axis+2)%3;
                 const double angle=click*2*M_PI/180;
-                near(u.Get(first,first),cos(angle),QString("Axis %1 rotation did not accumulate on click %2 (free=%3)").arg(axis).arg(click).arg(freeRotate));
-                near(u.Get(second,first),sin(angle),"Wrong rotation direction");
-                near(u.Get(axis,axis),1,"Wrong axis changed");
+                requireNear(u.Get(first,first),cos(angle),QString("Axis %1 rotation did not accumulate on click %2 (free=%3)").arg(axis).arg(click).arg(freeRotate));
+                requireNear(u.Get(second,first),sin(angle),"Wrong rotation direction");
+                requireNear(u.Get(axis,axis),1,"Wrong axis changed");
             }
             QAbstractButton *button=controls->findChild<QAbstractButton *>(left[axis]);
             require(button != nullptr, "Negative rotation button missing");
             for(int click=0; click<3; ++click)
                 calculate(film,[&]{button->click();});
             Matrix u=crystal->getU();
-            for(int i=0;i<3;++i) for(int j=0;j<3;++j) near(u.Get(i,j),i==j?1:0,"Inverse clicks did not restore orientation");
+            for(int i=0;i<3;++i) for(int j=0;j<3;++j) requireNear(u.Get(i,j),i==j?1:0,"Inverse clicks did not restore orientation");
         }
     }
     // These legacy workers have no QObject parent; stop them before the widgets go away.

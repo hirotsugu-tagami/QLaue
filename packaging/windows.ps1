@@ -17,7 +17,7 @@ foreach ($project in @('QLaue', 'image_import', 'crystal_features', 'print_align
     Push-Location $build
     try {
         $pro = if ($project -eq 'QLaue') { "$repo/QLaue.pro" } else { "$repo/tests/$project.pro" }
-        & qmake $pro -spec win32-msvc -config release
+        & qmake $pro -spec win32-msvc -config release 'QMAKE_CXXFLAGS+=/MP'
         & nmake /NOLOGO release
     } finally { Pop-Location }
 }
@@ -29,7 +29,7 @@ Remove-Item env:QT_QPA_PLATFORM
 
 $payload = (New-Item -ItemType Directory -Force dist/windows).FullName
 Copy-Item build-QLaue/release/QLaue.exe $payload
-& windeployqt --release --no-compiler-runtime --no-translations "$payload/QLaue.exe"
+& windeployqt --release --no-compiler-runtime --no-translations --no-opengl-sw --no-angle --no-system-d3d-compiler "$payload/QLaue.exe"
 # App-local CRT keeps installation per-user and usable without a separate download.
 Copy-Item "$env:VCToolsRedistDir/x64/Microsoft.VC143.CRT/*.dll" $payload
 Copy-Item LICENSE "$payload/LICENSE-QLaue.txt"
