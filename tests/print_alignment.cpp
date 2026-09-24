@@ -19,8 +19,9 @@ static QPointF colorCenter(const QImage &image, bool red) {
         const QRgb *row = reinterpret_cast<const QRgb *>(image.constScanLine(y));
         for(int x=0; x<image.width(); ++x) {
             const QRgb pixel = row[x];
-            const bool match = red ? qRed(pixel)>200 && qGreen(pixel)<80 && qBlue(pixel)<80
-                                   : qGreen(pixel)>100 && qRed(pixel)<60 && qBlue(pixel)<60;
+            // The synthetic markers use flat colors. Broad thresholds also
+            // pick up colored fringes from Windows' subpixel text rendering.
+            const bool match = pixel == (red ? qRgb(255,0,0) : qRgb(0,160,0));
             if(match) { xsum+=x; ysum+=y; ++count; }
         }
     }
