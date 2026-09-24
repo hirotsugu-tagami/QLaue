@@ -26,10 +26,9 @@
 
 TEMPLATE = app
 TARGET = QLaue
-#CONFIG += x86_64 x86
-CONFIG += x86_64
-
 CONFIG += release c++11
+win32-msvc*:DEFINES += _USE_MATH_DEFINES
+win32-msvc*:QMAKE_CXXFLAGS += /utf-8
 
 QT += xml network widgets printsupport
 
@@ -121,4 +120,3 @@ SOURCES += aboutbox.cpp \
 	   adjustimage.cpp \
 	   imagecontrols.cpp \
 	   pslcamera.cpp 
-RESOURCES += resources.qrc

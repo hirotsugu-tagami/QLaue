@@ -4,21 +4,31 @@ QLaue is a Qt desktop application for orienting single-crystal samples using the
 Laue method. The original project is
 [stuwilkins/QLaue](https://github.com/stuwilkins/QLaue).
 
-This source tree includes changes to build the application with Qt 5 on macOS.
+This source tree includes changes to build the application with Qt 5 on macOS
+and Windows.
 
-## Download for macOS
+## Download
 
-[Download QLaue for Apple Silicon (ZIP)](https://github.com/hirotsugu-tagami/QLaue/releases/download/macos-arm64-2026-09-24-r3/QLaue-macos-arm64-2026-09-24-r3.zip)
-or read the [release notes and checksums](https://github.com/hirotsugu-tagami/QLaue/releases/tag/macos-arm64-2026-09-24-r3).
+| Platform | Installer | Installation |
+| --- | --- | --- |
+| Windows 10/11, x64 | [QLaue-windows-x64-setup.exe](https://github.com/hirotsugu-tagami/QLaue/releases/download/preview-2026-09-24-r4/QLaue-windows-x64-setup.exe) | Run the setup wizard, then open QLaue from the Start menu. |
+| macOS, Apple Silicon | [QLaue-macos-arm64.dmg](https://github.com/hirotsugu-tagami/QLaue/releases/download/preview-2026-09-24-r4/QLaue-macos-arm64.dmg) | Open the disk image and drag QLaue.app to Applications. |
 
-Extract the ZIP and copy `QLaue.app` to Applications. Qt and the required runtime
-libraries are included; no separate Qt, Conda or Python installation is needed.
-This build is for Apple Silicon (arm64) and was checked on macOS 26.6.2.
+Save your analysis and close the old application before upgrading. Qt and the
+required runtime libraries are included; no separate Qt, Conda or Python
+installation is needed. The Windows installer installs for the current user
+without administrator privileges and provides an uninstaller. The macOS build
+is for Apple Silicon (arm64), with a macOS 11.0 deployment target, checked on
+macOS 26.6.2. An Intel Mac build is not included.
 
-The build is a **prerelease** with outstanding findings listed in
-[the audit report](docs/AUDIT-2026-09-24.md). It has an ad-hoc signature and has
-not been signed with an Apple Developer ID or notarized. If macOS blocks the
-first launch, verify the download source and follow
+See the [release notes and checksums](https://github.com/hirotsugu-tagami/QLaue/releases/tag/preview-2026-09-24-r4)
+for the source revision and validation details.
+
+These are **prereleases** with outstanding findings listed in
+[the audit report](docs/AUDIT-2026-09-24.md). The Windows installer is not
+Authenticode-signed. The macOS app has an ad-hoc signature and has not been
+signed with an Apple Developer ID or notarized. If macOS blocks the first launch,
+verify the download source and follow
 [Apple's instructions for opening the app](https://support.apple.com/102445).
 
 ## Build on macOS
@@ -66,6 +76,32 @@ Deployment, code signing and runtime testing are separate steps. The commands
 above apply a local ad-hoc signature. Apple Developer ID signing and notarization
 have not been performed for the published preview; see its release notes for
 the tested environment and known limitations.
+
+## Build Installers
+
+The [Windows installer workflow](.github/workflows/windows-installer.yml) can be
+run manually in GitHub Actions, or by pushing a `preview-*` tag. It builds with
+Qt 5.15.2/MSVC on Windows Server 2022, runs the image/CIF/rotation/print checks,
+and uses Qt's `windeployqt` and Inno Setup to create a single setup executable.
+It tests installation, upgrade, launch with the bundled runtime, and uninstall.
+Download `QLaue-windows-x64` from the successful run's artifacts; its contents
+include the `.exe`, SHA-256 checksum and build manifest. Publication to Releases
+is a separate step. For a local build with the same tools, run
+`pwsh -File packaging/windows.ps1` with Qt 5 on `PATH` and its matching source
+modules in the adjacent `Src` directory (for license notices).
+
+On macOS, prepare a directory containing the deployed and signed `QLaue.app`,
+`README.txt`, `LICENSE-QLaue.txt`, `build-manifest.json`, and `licenses/` with the
+runtime notices. Include dependency build recipes and patches when applicable.
+Then run:
+
+```sh
+bash packaging/macos-dmg.sh dist/macos-payload dist/installers/QLaue-macos-arm64.dmg
+```
+
+The script creates and verifies a compressed disk image with an Applications
+shortcut. Verify a mounted copy and its startup before publishing the `.dmg`
+and `.exe` together with their checksums as GitHub Release assets.
 
 ## Image Import and Checks
 
@@ -178,8 +214,8 @@ be rendered and visually checked, for example with Poppler's `pdftoppm`.
 
 The C++ sources, Qt Designer `.ui` files, project configuration and image/icon
 resources are kept in Git. Build directories, generated code, `.app` bundles,
-new `.dmg` files and macOS metadata are ignored. Previously tracked installers
-in `binary/` are retained as part of the upstream history. Current macOS binaries
+new installers and macOS metadata are ignored. Previously tracked installers
+in `binary/` are retained as part of the upstream history. Current Windows and macOS binaries
 are published as assets in [GitHub Releases](https://github.com/hirotsugu-tagami/QLaue/releases).
 
 ## License

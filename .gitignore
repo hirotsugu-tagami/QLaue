@@ -17,6 +17,9 @@
 *.app/
 *.dmg
 *.dSYM/
+*.exe
+*.obj
+*.pdb
 
 # Out-of-source builds and distribution output
 /build*/
