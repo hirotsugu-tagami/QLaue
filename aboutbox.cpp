@@ -26,6 +26,7 @@
 
 #include <QtCore>
 #include <QtGui>
+#include <QtWidgets>
 #include "aboutbox.h"
 #include "version.h"
 #include "svn.h"

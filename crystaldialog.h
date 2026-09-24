@@ -28,6 +28,7 @@
 #define _CRYSTALDIALOG_H 1
 
 #include <QtGui>
+#include <QtWidgets>
 #include "ui_crystaldialog.h"
 #include "crystal.h"
 

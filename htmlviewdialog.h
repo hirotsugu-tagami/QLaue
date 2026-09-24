@@ -29,6 +29,7 @@
 
 #include <QtCore>
 #include <QtGui>
+#include <QtWidgets>
 #include "ui_htmlviewdialog.h"
 #include "crystal.h"
 

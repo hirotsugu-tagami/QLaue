@@ -25,6 +25,7 @@
 */
 
 #include <QtGui>
+#include <QtWidgets>
 #include "ui_setubmat.h"
 #include "setubmat.h"
 #include "version.h"

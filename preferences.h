@@ -14,6 +14,7 @@
 #define _PREFERENCES_H 1
 
 #include <QtGui>
+#include <QtWidgets>
 #include "laue.h"
 #include "ui_preferences.h"
 

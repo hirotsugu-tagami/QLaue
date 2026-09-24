@@ -26,6 +26,7 @@
 
 #include <QtCore>
 #include <QtGui>
+#include <QtWidgets>
 #include "reorientdialog.h"
 #include "laue.h"
 
@@ -174,7 +175,7 @@ void ReorientDialog::setTableItem(QTableWidget *table, int x, int y, double val)
 		table->setItem(x,y, newItem);
 	} else {
 		double newval = val;
-		if(ui.AngleRangeP->isChecked() == TRUE){
+		if(ui.AngleRangeP->isChecked() == true){
 			if(val < 0){
 				newval = val + 360.0;
 			} 

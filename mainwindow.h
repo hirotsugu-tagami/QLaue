@@ -29,6 +29,8 @@
 
 #include <QtCore>
 #include <QtGui>
+#include <QtWidgets>
+#include <QPrinter>
 
 #include "ui_mainwindow.h"
 #include "lauewidget.h"

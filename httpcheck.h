@@ -29,6 +29,7 @@
 
 #include <QtCore>
 #include <QtGui>
+#include <QtWidgets>
 #include <QtNetwork>
 
 #include "ui_httpcheck.h"

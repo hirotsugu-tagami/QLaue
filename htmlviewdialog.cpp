@@ -26,6 +26,7 @@
 
 #include <QtCore>
 #include <QtGui>
+#include <QtWidgets>
 #include "htmlviewdialog.h"
 #include "htmlgenerators.h"
 #include "crystal.h"

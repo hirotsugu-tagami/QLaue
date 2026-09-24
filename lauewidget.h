@@ -32,6 +32,7 @@
 #include <QMutex>
 #include <QWaitCondition>
 #include <QRubberBand>
+#include <QPrinter>
 #include "laue.h"
 #include "crystal.h"
 

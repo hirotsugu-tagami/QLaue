@@ -26,6 +26,7 @@
 
 #include <QtCore>
 #include <QtGui>
+#include <QtWidgets>
 #include "rotatewidget.h"
 #include "matrix.h"
 

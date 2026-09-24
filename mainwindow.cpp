@@ -25,6 +25,8 @@
 */
 
 #include <QtGui>
+#include <QtWidgets>
+#include <QtPrintSupport>
 #include <QAbstractItemView>
 
 #ifdef Q_WS_MAC
@@ -745,7 +747,7 @@ void MainWindow::importImage(void){
 	
 	QImage pixmap;
 	
-	if(pixmap.load(s) != TRUE){
+	if(pixmap.load(s) != true){
 		// Could not import image 
 		QMessageBox::warning(this,
 							 "Import Image",
@@ -963,7 +965,11 @@ void MainWindow::displayIndexingResults(int nOrientations, LaueOrientations *ori
 	indexingWidget->setHorizontalHeaderLabels(headerLabels);
 	//indexingWidget->setShowGrid(false);
 	indexingWidget->setSortingEnabled(false);
+#if QT_VERSION >= QT_VERSION_CHECK(5, 0, 0)
+	indexingWidget->horizontalHeader()->setSectionResizeMode(QHeaderView::ResizeToContents);
+#else
 	indexingWidget->horizontalHeader()->setResizeMode(QHeaderView::ResizeToContents);
+#endif
 	
 	indexingWidget->setSelectionMode(QAbstractItemView::SingleSelection);
 	indexingWidget->setSelectionBehavior(QAbstractItemView::SelectRows);
@@ -1004,4 +1010,3 @@ void MainWindow::clearIndexingResults(void) {
 	indexingWidget->setColumnCount(0);
 	indexingWidget->setRowCount(0);
 }
-

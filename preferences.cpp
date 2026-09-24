@@ -26,6 +26,7 @@
 
 #include <QtCore>
 #include <QtGui>
+#include <QtWidgets>
 #include "laue.h"
 #include "xray.h"
 #include "preferences.h"
@@ -74,7 +75,7 @@ void PreferencesDialog::getLaue(lauegram* laue){
 	
 	laue->setLambdaRange(ui.LaueLambdaMinSpinBox->value(), ui.LaueLambdaMaxSpinBox->value());
 	
-	int Z = XRay::elementNumber(ui.LaueAnodeComboBox->currentText().toAscii());
+	int Z = XRay::elementNumber(ui.LaueAnodeComboBox->currentText().toLatin1());
 	if(Z != -1){
 		laue->setTubeZ(Z);
 	}

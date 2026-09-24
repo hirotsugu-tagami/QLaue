@@ -69,7 +69,7 @@ static
 QImage changeImage( const QImage& image, int value ) {
     QImage im = image;
     im.detach();
-    if( im.numColors() == 0 ) /* truecolor */ {
+    if( im.colorCount() == 0 ) /* truecolor */ {
         if( im.format() != QImage::Format_RGB32 ) /* just in case */
             im = im.convertToFormat( QImage::Format_RGB32 );
         int table[ 256 ];
@@ -97,7 +97,7 @@ QImage changeImage( const QImage& image, int value ) {
 		}
     } else {
         QVector<QRgb> colors = im.colorTable();
-        for(int i = 0;i < im.numColors();++i ){
+        for(int i = 0;i < im.colorCount();++i ){
             colors[ i ] = qRgb( operation( qRed( colors[ i ] ), value ),
                                 operation( qGreen( colors[ i ] ), value ),
                                 operation( qBlue( colors[ i ] ), value ));
@@ -110,11 +110,11 @@ QImage changeImage( const QImage& image, int value ) {
 QImage convertToPseudoColor(const QImage& image){
 	QImage im = image;
     im.detach();
-	if(image.numColors() == 0){
+	if(image.colorCount() == 0){
 		qDebug() << "convertToPseudoColor() : Not yet implemented, no colortable.";
 	} else {		
 		QVector<QRgb> colors = im.colorTable();
-		for(int i = 0;i < im.numColors();++i ){
+		for(int i = 0;i < im.colorCount();++i ){
 			int value = (qRed(colors[i]) + qBlue(colors[i]) + qGreen(colors[i]) ) / 3;
 			colors[i] = qRgb((sin(value * 2 * 3.141 / 255) + 1) * 255,
 							 (cos(value * 2 * 3.141 / 255) + 1) * 255,
@@ -154,4 +154,3 @@ QImage changeImageMin( const QImage& image, int min) {
 QImage changeImageMax( const QImage& image, int max) {
 	return changeImage< changeMax >(image, max);
 }
-

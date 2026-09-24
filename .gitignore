@@ -11,3 +11,24 @@
 *.lai
 *.la
 *.a
+
+# macOS metadata and application bundles
+.DS_Store
+*.app/
+*.dmg
+*.dSYM/
+
+# Out-of-source builds and distribution output
+/build*/
+/dist/
+
+# qmake-generated files (including in-source builds)
+Makefile
+Makefile.*
+.qmake.*
+/moc/
+/ui/
+/res/
+
+# Qt Creator user settings
+*.pro.user*

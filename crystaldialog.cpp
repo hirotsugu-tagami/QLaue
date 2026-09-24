@@ -178,7 +178,7 @@ void CrystalDialog::getCrystal(Crystal *crystal){
 	crystal->setSpaceGroup(SpacegroupBoxIndex[ui.SpacegroupBox->currentIndex()]);
 	crystal->spaceGroupGenerate();
 	
-	crystal->setName(ui.DescriptionTextEdit->toPlainText().toAscii());
+	crystal->setName(ui.DescriptionTextEdit->toPlainText().toLatin1());
 }
 
 void CrystalDialog::latticeTypeChanged(bool state){

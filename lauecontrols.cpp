@@ -26,6 +26,7 @@
 
 #include <QtCore>
 #include <QtGui>
+#include <QtWidgets>
 #include "lauewidget.h"
 #include "lauecontrols.h"
 

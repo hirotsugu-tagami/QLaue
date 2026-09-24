@@ -26,6 +26,7 @@
 
 #include <QtCore>
 #include <QtGui>
+#include <QtWidgets>
 #include "imagecontrols.h"
 
 ImageControlWidget::ImageControlWidget(QWidget *parent) : QWidget(parent) 

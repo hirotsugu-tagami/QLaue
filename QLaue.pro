@@ -25,13 +25,13 @@
 
 
 TEMPLATE = app
-TARGET = 
+TARGET = QLaue
 #CONFIG += x86_64 x86
 CONFIG += x86_64
 
 CONFIG += release
 
-QT += xml network
+QT += xml network widgets printsupport
 
 DEPENDPATH += . ui
 INCLUDEPATH += . ui

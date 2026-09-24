@@ -28,6 +28,7 @@
 #define _INDEXINGDIALOG_H
 
 #include <QtGui>
+#include <QtWidgets>
 #include "laue.h"
 #include "ui_indexingdialog.h"
 

@@ -138,7 +138,7 @@ void DataFile::parseLaueImage(QDomNode n){
 				oy = e.attribute("oy","0").toDouble();
 				scale = e.attribute("scale","0").toDouble();
 				
-				QByteArray base64 = e.text().toAscii();
+				QByteArray base64 = e.text().toLatin1();
 				laueImage.loadFromData(QByteArray::fromBase64(base64));
 			}
 		}
@@ -235,7 +235,7 @@ void DataFile::parseCrystal(QDomNode n){
 			} else if(e.tagName() == "spacegroup"){
 				parseSpacegroup(c);
 			} else if(e.tagName() == "description"){
-				crystal.setName(e.text().toAscii());
+				crystal.setName(e.text().toLatin1());
 			} else if(e.tagName() == "orientation")
 				parseOrientation(c);
 		}
@@ -273,13 +273,13 @@ void DataFile::parseSpacegroup(QDomNode n){
 				QString name = e.attribute("name","");
 				//qDebug("Setting spacegroup = %s",qPrintable(name));
 				if(!name.isEmpty())
-					crystal.setSpaceGroup((const char*)name.toAscii());
+					crystal.setSpaceGroup((const char*)name.toLatin1());
 			}
 			if(e.tagName() == "iucname"){
 				QString name = e.attribute("name","");
 				if(!name.isEmpty()){
 					//qDebug("Setting spacegroup = %s",qPrintable(name));
-					crystal.setSpaceGroupIUC((const char*)name.toAscii());
+					crystal.setSpaceGroupIUC((const char*)name.toLatin1());
 				}
 			}
 		}
