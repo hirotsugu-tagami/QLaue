@@ -21,10 +21,23 @@ foreach ($project in @('QLaue', 'image_import', 'crystal_features', 'print_align
         & nmake /NOLOGO release
     } finally { Pop-Location }
 }
-$env:QT_QPA_PLATFORM = 'offscreen'
-& ./build-image_import/release/image-import-check.exe
-& ./build-crystal_features/release/crystal-features-check.exe
-& ./build-print_alignment/release/print-alignment-check.exe ./build-print_alignment/output
+$env:QT_QPA_PLATFORM = 'windows'
+$env:QT_LOGGING_TO_CONSOLE = '1'
+foreach ($program in @(
+    './build-image_import/release/image-import-check.exe',
+    './build-crystal_features/release/crystal-features-check.exe',
+    './build-print_alignment/release/print-alignment-check.exe'
+)) {
+    $arguments = @()
+    if ($program -like '*print-alignment-check.exe') { $arguments = @('./build-print_alignment/output') }
+    try { & $program @arguments } catch {
+        $debugger = "${env:ProgramFiles(x86)}/Windows Kits/10/Debuggers/x64/cdb.exe"
+        if (Test-Path $debugger) {
+            & $debugger -c 'sxe -c ".ecxr; k; q" av; g' $program @arguments
+        }
+        throw
+    }
+}
 Remove-Item env:QT_QPA_PLATFORM
 
 $payload = (New-Item -ItemType Directory -Force dist/windows).FullName
