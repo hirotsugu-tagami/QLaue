@@ -8,8 +8,8 @@ This source tree includes changes to build the application with Qt 5 on macOS.
 
 ## Download for macOS
 
-[Download QLaue for Apple Silicon (ZIP)](https://github.com/hirotsugu-tagami/QLaue/releases/download/macos-arm64-2026-09-24/QLaue-macos-arm64-2026-09-24.zip)
-or read the [release notes and checksums](https://github.com/hirotsugu-tagami/QLaue/releases/tag/macos-arm64-2026-09-24).
+[Download QLaue for Apple Silicon (ZIP)](https://github.com/hirotsugu-tagami/QLaue/releases/download/macos-arm64-2026-09-24-r2/QLaue-macos-arm64-2026-09-24-r2.zip)
+or read the [release notes and checksums](https://github.com/hirotsugu-tagami/QLaue/releases/tag/macos-arm64-2026-09-24-r2).
 
 Extract the ZIP and copy `QLaue.app` to Applications. Qt and the required runtime
 libraries are included; no separate Qt, Conda or Python installation is needed.
@@ -98,6 +98,11 @@ fills the six cell parameters, space group, description and fractional atom
 coordinates. Review the values and click **OK** to apply them. **Cancel** leaves
 the current crystal unchanged; a failed import also preserves the editor contents.
 The existing crystal orientation is retained when the lattice is applied.
+Source atom coordinates retain their signs and integer cell offsets on import
+and after **OK**; for example, `-0.3333` stays `-0.3333`. Generated symmetry
+equivalents are reduced to the unit cell, and periodic copies are counted once.
+Uncertainties in parentheses are read as uncertainties, so `-0.0247(11)` is
+displayed as its central value, `-0.0247`.
 
 The importer supports conventional small-molecule/inorganic CIF 1.1 structure
 files: quoted and multiline values, comments, reordered atom-loop columns,
@@ -135,8 +140,9 @@ QT_QPA_PLATFORM=offscreen ./crystal-features-check
 
 These checks exercise real Qt controls with the non-native file dialog. They
 cover CIF validation, failed/cancelled imports, 51 atom sites, hydrogen, trigonal
-symmetry, triclinic reciprocal geometry and repeated positive/negative rotation
-on all three axes in both rotation modes.
+symmetry, signed source coordinates through import/display/apply, periodic atom
+equivalence, triclinic reciprocal geometry and repeated positive/negative
+rotation on all three axes in both rotation modes.
 
 See [the September 2026 audit](docs/AUDIT-2026-09-24.md) for finding status,
 evidence, reproduction commands and the scope of verification. The follow-up

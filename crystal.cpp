@@ -712,17 +712,10 @@ void Crystal::sgTransform(void){
 }
 
 bool Crystal::sgInsertAtom(const Atom a, const Matrix pos){
-	// Check for stupidity and	
-	// If we have a negative number then add 1 to it.
+	// Keep source coordinates as entered; wrap only generated equivalents.
 	Matrix newpos(pos);
-	for(int i=0;i<3;i++){
-		if((newpos.Get(0,i) >= 1) && (newpos.Get(0,i) < 2))
-			newpos.Set(0,i,newpos.Get(0,i) - 1);
-		if((newpos.Get(0,i) < 0) && (newpos.Get(0,i) >= -1))
-			newpos.Set(0,i,newpos.Get(0,i) + 1);
-		if((newpos.Get(0,i) < -1) && (newpos.Get(0,i) >= -2))
-			newpos.Set(0,i,newpos.Get(0,i) + 2);
-	}
+	for(int i=0;i<3;i++)
+		newpos.Set(i,0,newpos.Get(i,0) - std::floor(newpos.Get(i,0)));
 	
 	// Is there an atom already in this place ?
 	// Define an accuracy based on the lattice parameter
@@ -732,9 +725,13 @@ bool Crystal::sgInsertAtom(const Atom a, const Matrix pos){
 	double zacc = (0.25 / getLatticeC());
 	
 	for(int n=0;n<(natoms + natoms_sggen);++n){
-		if((abs(newpos.Get(0,0) - atoms[n].getXPos()) < xacc) &&
-		   (abs(newpos.Get(0,1) - atoms[n].getYPos()) < yacc) &&
-		   (abs(newpos.Get(0,2) - atoms[n].getZPos()) < zacc)) {
+		// Positions separated by integer cell translations describe the same site.
+		double dx = newpos.Get(0,0) - atoms[n].getXPos();
+		double dy = newpos.Get(1,0) - atoms[n].getYPos();
+		double dz = newpos.Get(2,0) - atoms[n].getZPos();
+		if((std::abs(dx - std::round(dx)) < xacc) &&
+		   (std::abs(dy - std::round(dy)) < yacc) &&
+		   (std::abs(dz - std::round(dz)) < zacc)) {
 			//cerr << "Crystal::sgInsertAtom() : Atom located at this pos" << endl;
 				return false;
 		}

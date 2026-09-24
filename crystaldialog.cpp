@@ -177,7 +177,7 @@ void CrystalDialog::getCrystal(Crystal *crystal){
 			a = ui.AtomsTable->item(i,1)->text().toDouble();
 			b = ui.AtomsTable->item(i,2)->text().toDouble();
 			c = ui.AtomsTable->item(i,3)->text().toDouble();
-			crystal->addAtom(box->currentIndex(),a-std::floor(a),b-std::floor(b),c-std::floor(c));
+			crystal->addAtom(box->currentIndex(),a,b,c);
 		}
 	}
 	

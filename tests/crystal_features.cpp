@@ -38,7 +38,7 @@ static QString cell(const QString &group = "_space_group_name_H-M_alt 'P 1'\n") 
 }
 
 static QString atoms() {
-    // Column order, wrapped rows, quoted labels, negative/wrapped coordinates and H.
+    // Column order, wrapped rows, quoted labels, signed fractional coordinates and H.
     return "loop_\n_atom_site_fract_z\n_atom_site_label\n_atom_site_fract_x\n"
            "_atom_site_type_symbol\n_atom_site_occupancy\n_atom_site_fract_y\n"
            "0.3 'H1' -0.125 H 1\n1.25 # split atom row\n0.6 O1 0.4 O 1 0.5\n";
@@ -108,8 +108,9 @@ static void checkCif(const QTemporaryDir &directory) {
     checkCell(parsed);
     require(parsed.getNRootAtoms()==2, "Atom loop not loaded");
     require(parsed.getAtom(0)->getZ()==1 && parsed.getAtom(1)->getZ()==8, "Elements changed");
-    near(parsed.getAtom(0)->getXPos(), 0.875, "Negative fractional coordinate not wrapped");
-    near(parsed.getAtom(0)->getYPos(), 0.25, "Fractional coordinate over one not wrapped");
+    near(parsed.getAtom(0)->getXPos(), -0.125, "Negative fractional coordinate changed");
+    near(parsed.getAtom(0)->getYPos(), 1.25, "Fractional coordinate over one changed");
+    require(parsed.getNAtoms()==2, "P1 added periodic copies of the source atoms");
     require(QString::fromUtf8(parsed.getName())=="Imported crystal\nfrom CIF", "Multiline name lost");
 
     CrystalDialog dialog;
@@ -131,6 +132,8 @@ static void checkCif(const QTemporaryDir &directory) {
     dialog.getCrystal(&roundTrip);
     checkCell(roundTrip);
     require(roundTrip.getNRootAtoms()==2 && roundTrip.getAtom(0)->getZ()==1, "Hydrogen lost in dialog");
+    near(roundTrip.getAtom(0)->getXPos(), -0.125, "Dialog changed negative fractional x");
+    near(roundTrip.getAtom(0)->getYPos(), 1.25, "Dialog changed fractional y over one");
     importViaDialog(dialog, directory.filePath("anything.CIF"), true);
     dialog.getCrystal(&roundTrip);
     checkCell(roundTrip);
@@ -251,6 +254,85 @@ static void checkCif(const QTemporaryDir &directory) {
     qInfo() << "PASS: CIF parsing, symmetry, triclinic metric, atom tables, dialog import/cancel/errors";
 }
 
+static void checkSourceCoordinates(const QTemporaryDir &directory) {
+    // Minimal regression structure from the reported Na2Co2TeO6 CIF.
+    // QLAUE_COORDINATE_CIF can point to the original file for the same checks.
+    QString path = qEnvironmentVariable("QLAUE_COORDINATE_CIF");
+    if(path.isEmpty()) path = writeCif(directory,
+        "data_Na2Co2TeO6\n_space_group_name_H-M_alt 'P 63 2 2'\n_space_group_IT_number 182\n"
+        "_cell_length_a 5.2709(2)\n_cell_length_b 5.2709(2)\n_cell_length_c 11.2615(15)\n"
+        "_cell_angle_alpha 90\n_cell_angle_beta 90\n_cell_angle_gamma 120\n"
+        "loop_\n_atom_site_label\n_atom_site_type_symbol\n_atom_site_fract_x\n"
+        "_atom_site_fract_y\n_atom_site_fract_z\n_atom_site_U_iso_or_equiv\n"
+        "Te Te -0.3333 -0.6667 -0.2500 0.0080(6)\n"
+        "Co1 Co 0.0000 0.0000 -0.2500 0.0058(8)\n"
+        "Co2 Co -0.6667 -0.3333 -0.2500 0.0100(9)\n"
+        "O O -0.0247(11) -0.3592(10) -0.3442(4) 0.0123(11)\n"
+        "Na Na -0.3200(20) -0.3200(20) -0.5000 0.088(5)\n");
+    const int elements[] = {52, 27, 27, 8, 11};
+    const double positions[][3] = {{-.3333,-.6667,-.25}, {0,0,-.25},
+        {-.6667,-.3333,-.25}, {-.0247,-.3592,-.3442}, {-.32,-.32,-.5}};
+    const auto check = [&](Crystal &crystal) {
+        require(crystal.getSpaceGroup()->number==182, "Reported CIF space group changed");
+        require(crystal.getNRootAtoms()==5, "Reported CIF lost source sites");
+        for(int row=0; row<5; ++row) {
+            Atom *atom = crystal.getAtom(row);
+            require(atom->getZ()==elements[row], "Reported CIF element changed");
+            near(atom->getXPos(),positions[row][0],QString("CIF site %1 x changed").arg(row+1));
+            near(atom->getYPos(),positions[row][1],QString("CIF site %1 y changed").arg(row+1));
+            near(atom->getZPos(),positions[row][2],QString("CIF site %1 z changed").arg(row+1));
+        }
+        // Independently cross-checked using Gemmi 0.7.5 with the original CIF.
+        require(crystal.getNAtoms()==24, "Incorrect P6322 expansion of the reported CIF");
+        int counts[99] = {};
+        for(int i=0; i<crystal.getNAtoms(); ++i) ++counts[crystal.getAtom(i)->getZ()];
+        require(counts[52]==2 && counts[27]==4 && counts[8]==12 && counts[11]==6,
+                "Reported CIF symmetry multiplicities changed");
+    };
+    DataFile data;
+    require(data.readCif(path),data.getErrorStr());
+    Crystal parsed = data.getCrystal();
+    check(parsed);
+    CrystalDialog dialog;
+    importViaDialog(dialog,path);
+    QTableWidget *table = dialog.findChild<QTableWidget *>("AtomsTable");
+    require(table != nullptr,"Atom table is missing");
+    for(int row=0; row<5; ++row) for(int column=0; column<3; ++column)
+        near(table->item(row,column+1)->text().toDouble(),positions[row][column],
+             "Set Lattice display differs from source coordinates");
+    const QString screenshot = qEnvironmentVariable("QLAUE_COORDINATE_SCREENSHOT");
+    if(!screenshot.isEmpty()) {
+        dialog.show();
+        QApplication::processEvents();
+        require(dialog.grab().save(screenshot),"Cannot save coordinate dialog preview");
+    }
+    dialog.accept();
+    require(dialog.result()==QDialog::Accepted,"Reported CIF cannot be applied");
+    Crystal roundTrip;
+    dialog.getCrystal(&roundTrip);
+    check(roundTrip);
+    dialog.setCrystal(&roundTrip);
+    dialog.getCrystal(&roundTrip);
+    check(roundTrip);
+
+    // Integer cell translations must not add atoms or change their phases.
+    Crystal translated(parsed);
+    translated.delAllAtoms();
+    for(int row=0; row<5; ++row)
+        translated.addAtom(elements[row],positions[row][0]+3,positions[row][1]-4,positions[row][2]+2);
+    translated.spaceGroupGenerate();
+    require(translated.getNAtoms()==parsed.getNAtoms(),"Cell translations duplicated atoms");
+    for(int h=-2; h<=2; ++h) for(int k=-2; k<=2; ++k) for(int l=-2; l<=2; ++l) {
+        std::complex<double> before(0,0), after(0,0);
+        for(int i=0; i<parsed.getNAtoms(); ++i) {
+            before += double(parsed.getAtom(i)->getZ()) * parsed.getAtom(i)->getPhase(h,k,l);
+            after += double(translated.getAtom(i)->getZ()) * translated.getAtom(i)->getPhase(h,k,l);
+        }
+        near(std::abs(before-after),0,"Cell translations changed atomic phases");
+    }
+    qInfo() << "PASS: all 15 reported CIF coordinates survive import, display and repeated apply; 24 symmetry sites and periodic phases";
+}
+
 static void calculate(LaueFilm *film, const std::function<void()> &action) {
     QEventLoop loop;
     QTimer timeout;
@@ -330,6 +412,7 @@ int main(int argc,char **argv) {
     QCoreApplication::setOrganizationName("QLaueTests");
     QCoreApplication::setApplicationName("CrystalFeatures");
     if(argc==1 || QString(argv[1])=="cif") checkCif(directory);
+    if(argc==1 || QString(argv[1])=="coordinates") checkSourceCoordinates(directory);
     if(argc==1 || QString(argv[1])=="rotation") checkRotation();
     return 0;
 }
