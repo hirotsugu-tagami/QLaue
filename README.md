@@ -6,6 +6,21 @@ Laue method. The original project is
 
 This source tree includes changes to build the application with Qt 5 on macOS.
 
+## Download for macOS
+
+[Download QLaue for Apple Silicon (ZIP)](https://github.com/hirotsugu-tagami/QLaue/releases/download/macos-arm64-2026-09-24/QLaue-macos-arm64-2026-09-24.zip)
+or read the [release notes and checksums](https://github.com/hirotsugu-tagami/QLaue/releases/tag/macos-arm64-2026-09-24).
+
+Extract the ZIP and copy `QLaue.app` to Applications. Qt and the required runtime
+libraries are included; no separate Qt, Conda or Python installation is needed.
+This build is for Apple Silicon (arm64) and was checked on macOS 26.6.2.
+
+The build is a **prerelease** with outstanding findings listed in
+[the audit report](docs/AUDIT-2026-09-24.md). It has an ad-hoc signature and has
+not been signed with an Apple Developer ID or notarized. If macOS blocks the
+first launch, verify the download source and follow
+[Apple's instructions for opening the app](https://support.apple.com/102445).
+
 ## Build on macOS
 
 Requirements:
@@ -43,11 +58,14 @@ tool from `build-qt5`:
 
 ```sh
 "$QT_BIN/macdeployqt" QLaue.app
+codesign --force --deep --sign - QLaue.app
+codesign --verify --deep --strict QLaue.app
 ```
 
-Deployment, code signing and runtime testing are separate steps. This repository
-does not contain a notarized release or claim that the generated app is ready
-for public distribution.
+Deployment, code signing and runtime testing are separate steps. The commands
+above apply a local ad-hoc signature. Apple Developer ID signing and notarization
+have not been performed for the published preview; see its release notes for
+the tested environment and known limitations.
 
 ## Image Import and Checks
 
@@ -130,8 +148,8 @@ editor defects; other persistence, threading and scientific findings remain.
 The C++ sources, Qt Designer `.ui` files, project configuration and image/icon
 resources are kept in Git. Build directories, generated code, `.app` bundles,
 new `.dmg` files and macOS metadata are ignored. Previously tracked installers
-in `binary/` are retained as part of the upstream history. New release binaries
-can be attached to GitHub Releases separately from source commits.
+in `binary/` are retained as part of the upstream history. Current macOS binaries
+are published as assets in [GitHub Releases](https://github.com/hirotsugu-tagami/QLaue/releases).
 
 ## License
 
