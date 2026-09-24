@@ -27,6 +27,7 @@
 #include <QtCore>
 #include <QtGui>
 #include <QtWidgets>
+#include <QScopedValueRollback>
 #include <algorithm>
 
 #include "matrix.h"
@@ -319,6 +320,11 @@ void LaueThread::run(){
 		setNspots(spotn);
 		emit calculated();
 		mutex.lock();
+		// Shutdown can be requested while the calculated signal is delivered.
+		if(abort){
+			mutex.unlock();
+			return;
+		}
 		if (!restart)
 			condition.wait(&mutex);
 		restart = false;
@@ -545,6 +551,13 @@ void LaueFilm::print(QPrinter *printer, QPainter *painter, int mode){
 		laueR = QRect(10,10,printer->width() - 20, (printer->height() / 2) - 20);
 		text = QRectF(10,(printer->height() / 2) + 10, printer->width() - 20, (printer->height()/2) - 20);
 	}
+
+	// Coordinate conversion must use the same viewport as the printed image.
+	// Restore the interactive image geometry when printing is finished.
+	QScopedValueRollback<QRect> printRect(laueRect, laueR);
+	QScopedValueRollback<QImage> screenImage(*importedScaledImage);
+	QScopedValueRollback<QPoint> screenImagePos(importedImagePos);
+	QScopedValueRollback<QPoint> screenImageCenter(importedImageCenter);
 	
 	paintLaueBox(painter, laueR);
 	if(getBit(display,LaueFilm::DisplayImage))
@@ -869,7 +882,7 @@ void LaueFilm::paintLaue(QPainter *painter, QRect size) {
 		// draw the spots!
 		QPoint spotpos = worldToPixels(QPointF(laue->getSpot(i)->X(), laue->getSpot(i)->Y())); 
 		
-		spot.moveCenter(spotpos - QPoint(2,0));
+		spot.moveCenter(spotpos);
 		
 		if(size.contains(spot,true)){
 			painter->setPen(Qt::NoPen);
@@ -1325,8 +1338,8 @@ QPoint LaueFilm::worldToPixels(QPointF world){
 	QPoint origin;
 	
 	QPointF nworld = world + laueOrigin;
-	QPoint pixel = QPoint((int)(nworld.x()*pixels_per_mm/isf),
-						  (int)(nworld.y()*pixels_per_mm/isf) * -1);
+	QPoint pixel = QPoint(qRound(nworld.x()*pixels_per_mm/isf),
+						  qRound(-nworld.y()*pixels_per_mm/isf));
 	pixel = laueRect.center() + pixel;
 
 	return pixel;

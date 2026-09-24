@@ -8,8 +8,8 @@ This source tree includes changes to build the application with Qt 5 on macOS.
 
 ## Download for macOS
 
-[Download QLaue for Apple Silicon (ZIP)](https://github.com/hirotsugu-tagami/QLaue/releases/download/macos-arm64-2026-09-24-r2/QLaue-macos-arm64-2026-09-24-r2.zip)
-or read the [release notes and checksums](https://github.com/hirotsugu-tagami/QLaue/releases/tag/macos-arm64-2026-09-24-r2).
+[Download QLaue for Apple Silicon (ZIP)](https://github.com/hirotsugu-tagami/QLaue/releases/download/macos-arm64-2026-09-24-r3/QLaue-macos-arm64-2026-09-24-r3.zip)
+or read the [release notes and checksums](https://github.com/hirotsugu-tagami/QLaue/releases/tag/macos-arm64-2026-09-24-r3).
 
 Extract the ZIP and copy `QLaue.app` to Applications. Qt and the required runtime
 libraries are included; no separate Qt, Conda or Python installation is needed.
@@ -148,6 +148,31 @@ See [the September 2026 audit](docs/AUDIT-2026-09-24.md) for finding status,
 evidence, reproduction commands and the scope of verification. The follow-up
 fixes resolve the matrix memory defects, crystal name/rotation state and atom
 editor defects; other persistence, threading and scientific findings remain.
+
+## Print or Save the Analysis as PDF
+
+With **Laue > Show Image** enabled, use **File > Print** to print the imported
+image and calculated spots together with crystal and orientation parameters.
+On macOS, choose **PDF > Save as PDF** in the print dialog. **Show Labels**
+controls the hkl labels. The r3 build fixes the image/spot displacement caused
+by using the screen's origin when drawing on a different-sized printed page.
+Printing now uses the page's plot area and restores the screen's image geometry
+afterwards.
+
+To check image/spot alignment in portrait and landscape at 72 and 300 dpi:
+
+```sh
+mkdir -p build-print-check
+cd build-print-check
+"$QT_BIN/qmake" ../tests/print_alignment.pro
+make -j4
+QT_QPA_PLATFORM=offscreen ./print-alignment-check ./output
+```
+
+The check creates synthetic marker images, screen references, print rasters and
+PDFs. It verifies that the calculated spot overlaps the imported marker and
+that printing preserves the screen's image scale. Generated PDFs should also
+be rendered and visually checked, for example with Poppler's `pdftoppm`.
 
 ## Repository Contents
 
