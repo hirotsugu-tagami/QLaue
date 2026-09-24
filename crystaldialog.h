@@ -62,11 +62,17 @@ public:
 	CrystalDialog();
 	void setCrystal(Crystal *crystal);
 	void getCrystal(Crystal *crystal);
+public slots:
+	void accept() override;
 private slots:
+	void importCif();
 	void latticeTypeChanged(bool state);	
 	void latticeAChanged(const QString newval);
 	void setSpacegroupBox(int crystaltype);
 private:
+	void resetAtomTable(int rows);
+	QString validationError() const;
+	QString importDirectory;
 	Ui::CrystalDialog ui;
 	int lattice_type;
 	int SpacegroupBoxIndex[1000];

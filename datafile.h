@@ -100,10 +100,6 @@ private:
 	void parseOrientation(QDomNode n);
 	void parseParameters(QDomNode n);
 	void parseLaueImage(QDomNode n);
-	// Parsers for non XML data
-	
-	bool process_cif_numvalue(QStringList list, QString tok, double* num);
-	bool process_cif_numvalue(QStringList list, QString tok, int* num);
 };
 
 #endif

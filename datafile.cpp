@@ -28,6 +28,7 @@
 #include <QtXml/QtXml>
 #include <QImage>
 #include "datafile.h"
+#include "cifreader.h"
 #include "crystal.h"
 #include "laue.h"
 #include "matrix.h"
@@ -417,58 +418,8 @@ QString DataFile::getErrorStr(void){
 }
 
 bool DataFile::readCif(QString filename){
-	
-	QFile file(filename);
-	file.open(QFile::ReadOnly | QFile::Text);
-	
-	double a = 0,b = 0,c = 0;
-	double alpha = 0,beta = 0,gamma = 0;
-	//int num;
-	
-	while (!file.atEnd()) {
-		QByteArray line = file.readLine();
-		QStringList list = QString(line).split(QRegExp("\\s+"),QString::SkipEmptyParts);
-		
-		if(!list.isEmpty()){
-			qDebug("DataFile::process_cif_line() : token == (%s)",qPrintable(list.at(0)));
-			process_cif_numvalue(list,"_cell_length_a", &a);
-			process_cif_numvalue(list,"_cell_length_b", &b);
-			process_cif_numvalue(list,"_cell_length_c", &c);
-			process_cif_numvalue(list,"_cell_angle_alpha", &alpha);
-			process_cif_numvalue(list,"_cell_angle_beta", &beta);
-			process_cif_numvalue(list,"_cell_angle_gamma", &gamma);
-			//if(process_cif_numvalue(list,"_symmetry_Int_Tables_number", &num))
-			//	crystal.setSpaceGroup(num);
-			if(list.at(0) == "_symmetry_space_group_name_H-M")
-				cerr << "Spacegroup = " << qPrintable(list.at(1)) << endl;
-		}
-	}
-	
-	crystal.setLattice(a,b,c,M_PI * alpha / 180,M_PI * beta / 180,M_PI * gamma / 180);
-	crystal.spaceGroupGenerate();
-	return true;
-}
-
-bool DataFile::process_cif_numvalue(QStringList list, QString tok, double* num){
-	if(list.at(0) == tok){
-		QString val = list.at(1);
-		val.replace('(',"");
-		val.replace(')',"");
-		*num = val.toDouble();
-		return true;
-	}
-	return false;
-}
-
-bool DataFile::process_cif_numvalue(QStringList list, QString tok, int* num){
-	if(list.at(0) == tok){
-		QString val = list.at(1);
-		val.replace('(',"");
-		val.replace(')',"");
-		*num = val.toInt();
-		return true;
-	}
-	return false;
+	errorColumn = 0;
+	return readCifFile(filename, crystal, errorStr, errorLine);
 }
 
 bool DataFile::readCel(QString filename){

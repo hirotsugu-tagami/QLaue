@@ -27,11 +27,15 @@
 #include "atom.h"
 #include "crystal.h"
 #include "crystaldialog.h"
+#include "datafile.h"
+#include <cmath>
 
 extern spacegroup spacegroups[];
 
 CrystalDialog::CrystalDialog() {
 	ui.setupUi(this);
+	ui.AtomsTable->setHorizontalHeaderLabels(QStringList() << tr("Element") << tr("x") << tr("y") << tr("z"));
+	connect(ui.importCifButton, SIGNAL(clicked()), this, SLOT(importCif()));
 	
 	// Setup the radiobuttons for lattice type
 	
@@ -48,6 +52,10 @@ CrystalDialog::CrystalDialog() {
 	
 	ui.CubicButton->setChecked(true);
 	ui.DescriptionTextEdit->setAcceptRichText(false);
+	resetAtomTable(50);
+}
+
+void CrystalDialog::resetAtomTable(int rows) {
 	
 	// Setup the table
 	
@@ -59,8 +67,9 @@ CrystalDialog::CrystalDialog() {
 	
 	int xwidth = (int)((double)(ui.AtomsTable->width() - 150) / 3.0);
 	
-	ui.AtomsTable->setRowCount(50);
-	for(int i=0;i<50;i++){
+	ui.AtomsTable->setRowCount(0);
+	ui.AtomsTable->setRowCount(rows);
+	for(int i=0;i<rows;i++){
 		ui.AtomsTable->setColumnWidth(0,100);
 		ui.AtomsTable->setRowHeight(i,25);
 		QComboBox *newItem = new QComboBox;
@@ -78,24 +87,15 @@ CrystalDialog::CrystalDialog() {
 }
 
 void CrystalDialog::setCrystal(Crystal *crystal){
-	// Load Lattice Parameters
-	
-	ui.LatticeA->setText(QString("%1").arg(crystal->getLatticeA()));
-	ui.LatticeB->setText(QString("%1").arg(crystal->getLatticeB()));
-	ui.LatticeC->setText(QString("%1").arg(crystal->getLatticeC()));
-	
-	ui.LatticeAlpha->setText(QString("%1").arg(180.0 * crystal->getLatticeAlpha() / M_PI));
-	ui.LatticeBeta->setText(QString("%1").arg(180.0 * crystal->getLatticeBeta() / M_PI));
-	ui.LatticeGamma->setText(QString("%1").arg(180.0 * crystal->getLatticeGamma() / M_PI));
-
 	// Load Atoms
 	
 	int natoms = crystal->getNRootAtoms();
+	resetAtomTable(qMax(50, natoms));
 	
 	for(int i=0; i<natoms; i++){
-		ui.AtomsTable->item(i,1)->setText(QString("%1").arg(crystal->getAtom(i)->getXPos()));
-		ui.AtomsTable->item(i,2)->setText(QString("%1").arg(crystal->getAtom(i)->getYPos()));
-		ui.AtomsTable->item(i,3)->setText(QString("%1").arg(crystal->getAtom(i)->getZPos()));
+		ui.AtomsTable->item(i,1)->setText(QString::number(crystal->getAtom(i)->getXPos(), 'g', 15));
+		ui.AtomsTable->item(i,2)->setText(QString::number(crystal->getAtom(i)->getYPos(), 'g', 15));
+		ui.AtomsTable->item(i,3)->setText(QString::number(crystal->getAtom(i)->getZPos(), 'g', 15));
 		QComboBox *box = (QComboBox*)ui.AtomsTable->cellWidget(i,0);
 		box->setCurrentIndex(crystal->getAtom(i)->getZ());
 	}
@@ -138,9 +138,18 @@ void CrystalDialog::setCrystal(Crystal *crystal){
 		}
 	}
 	
+	// Changing the lattice type resets fields; restore the exact values afterwards.
+	const QSignalBlocker latticeABlocker(ui.LatticeA);
+	ui.LatticeA->setText(QString::number(crystal->getLatticeA(), 'g', 15));
+	ui.LatticeB->setText(QString::number(crystal->getLatticeB(), 'g', 15));
+	ui.LatticeC->setText(QString::number(crystal->getLatticeC(), 'g', 15));
+	ui.LatticeAlpha->setText(QString::number(180.0 * crystal->getLatticeAlpha() / M_PI, 'g', 15));
+	ui.LatticeBeta->setText(QString::number(180.0 * crystal->getLatticeBeta() / M_PI, 'g', 15));
+	ui.LatticeGamma->setText(QString::number(180.0 * crystal->getLatticeGamma() / M_PI, 'g', 15));
+
 	// Set the description text
 	
-	ui.DescriptionTextEdit->setPlainText(crystal->getName());
+	ui.DescriptionTextEdit->setPlainText(QString::fromUtf8(crystal->getName()));
 }
 
 void CrystalDialog::getCrystal(Crystal *crystal){
@@ -164,11 +173,11 @@ void CrystalDialog::getCrystal(Crystal *crystal){
 	
 	for(int i=0; i<ui.AtomsTable->rowCount(); ++i){
 		QComboBox *box = (QComboBox*)ui.AtomsTable->cellWidget(i,0);
-		if(box->currentIndex() > 1){
+		if(box->currentIndex() > 0){
 			a = ui.AtomsTable->item(i,1)->text().toDouble();
 			b = ui.AtomsTable->item(i,2)->text().toDouble();
 			c = ui.AtomsTable->item(i,3)->text().toDouble();
-			crystal->addAtom(box->currentIndex(),a,b,c);
+			crystal->addAtom(box->currentIndex(),a-std::floor(a),b-std::floor(b),c-std::floor(c));
 		}
 	}
 	
@@ -178,7 +187,63 @@ void CrystalDialog::getCrystal(Crystal *crystal){
 	crystal->setSpaceGroup(SpacegroupBoxIndex[ui.SpacegroupBox->currentIndex()]);
 	crystal->spaceGroupGenerate();
 	
-	crystal->setName(ui.DescriptionTextEdit->toPlainText().toLatin1());
+	crystal->setName(ui.DescriptionTextEdit->toPlainText().toUtf8().constData());
+}
+
+QString CrystalDialog::validationError() const {
+	QLineEdit *fields[] = {ui.LatticeA,ui.LatticeB,ui.LatticeC,
+		ui.LatticeAlpha,ui.LatticeBeta,ui.LatticeGamma};
+	double cell[6];
+	for(int i=0; i<6; ++i){
+		bool ok = false;
+		cell[i] = fields[i]->text().toDouble(&ok);
+		if(!ok) return tr("Enter a valid number in each lattice field.");
+		if(i >= 3) cell[i] *= M_PI / 180;
+	}
+	if(!Crystal::isValidLattice(cell[0],cell[1],cell[2],cell[3],cell[4],cell[5]))
+		return tr("The unit cell has invalid lengths, angles or volume.");
+	if(ui.SpacegroupBox->currentIndex() < 0) return tr("Select a space group.");
+	Crystal candidate;
+	candidate.setSpaceGroup(SpacegroupBoxIndex[ui.SpacegroupBox->currentIndex()]);
+	int atoms = 0;
+	for(int row=0; row<ui.AtomsTable->rowCount(); ++row){
+		QComboBox *box = qobject_cast<QComboBox *>(ui.AtomsTable->cellWidget(row,0));
+		if(box->currentIndex() <= 0) continue;
+		if(++atoms > candidate.maxRootAtoms())
+			return tr("Too many atom sites for this space group (maximum %1 sites).")
+				.arg(candidate.maxRootAtoms());
+		for(int column=1; column<4; ++column){
+			bool ok = false;
+			double position = ui.AtomsTable->item(row,column)->text().toDouble(&ok);
+			if(!ok || !std::isfinite(position))
+				return tr("Enter valid fractional coordinates for atom %1.").arg(row+1);
+		}
+	}
+	return QString();
+}
+
+void CrystalDialog::accept() {
+	const QString error = validationError();
+	if(!error.isEmpty()) {
+		QMessageBox::warning(this, tr("Set Lattice"), error);
+		return;
+	}
+	QDialog::accept();
+}
+
+void CrystalDialog::importCif() {
+	const QString filename = QFileDialog::getOpenFileName(this, tr("Import crystal from CIF"),
+		importDirectory, tr("CIF Files (*.cif *.CIF);;All Files (*)"));
+	if(filename.isEmpty()) return;
+	DataFile data;
+	if(!data.readCif(filename)) {
+		QMessageBox::warning(this, tr("CIF import failed"),
+			tr("Could not import %1.\n\n%2").arg(QFileInfo(filename).fileName(), data.getErrorStr()));
+		return;
+	}
+	Crystal imported = data.getCrystal();
+	setCrystal(&imported);
+	importDirectory = QFileInfo(filename).absolutePath();
 }
 
 void CrystalDialog::latticeTypeChanged(bool state){

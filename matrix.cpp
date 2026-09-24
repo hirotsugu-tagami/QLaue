@@ -44,10 +44,7 @@ Matrix::Matrix(int r, int c){
   init(r,c);
 }
 
-Matrix::Matrix(void): data(NULL) {
-	cerr << "WARNING :: creating matrix out of thin air\n";
-	data = NULL;
-}
+Matrix::Matrix(void): rows(0), cols(0), data(NULL) {}
 
 Matrix::Matrix(double a, double b, double c,
 			   double d, double e, double f,
@@ -108,12 +105,7 @@ Matrix::Matrix(const Matrix &M) {
 }
 
 Matrix::~Matrix(){
-	//cerr << "Deleteing :" << data << "\n";
-	if(data != NULL){
-		delete data;
-	} else {
-		cerr << "Deleteing NULL data" << endl;
-	}
+	delete [] data;
 }
 
 double Matrix::dot(Matrix other) {
@@ -155,13 +147,18 @@ void Matrix::_put(int i, double num){
 Matrix Matrix::transpose(void){
 	// Transpose of the matrix .. 
 	Matrix dest(cols,rows);
-	for(int i = 0 ; i < cols ; i++ )
-		for( int j = 0 ; j < rows ; j++ )
+	for(int i = 0 ; i < rows ; i++ )
+		for( int j = 0 ; j < cols ; j++ )
 			dest.Set(j,i,Get(i,j));
 	return dest;
 }
 
 Matrix Matrix::operator=(const Matrix M){
+	if(rows * cols != M.rows * M.cols){
+		double *replacement = new double[M.rows * M.cols];
+		delete [] data;
+		data = replacement;
+	}
 	cols = M.cols;
 	rows = M.rows;
 	for(int i=0;i<(cols*rows);i++){
@@ -188,7 +185,7 @@ Matrix operator+(Matrix a,Matrix b){
 	Matrix result(a.Rows(),a.Cols());
 	for(int i = 0 ; i < a.Rows() ; i++)
 		for( int j = 0 ; j < a.Cols() ; j++)
-			result.Set(j,i,a.Get(j,i) + b.Get(j,i));
+			result.Set(i,j,a.Get(i,j) + b.Get(i,j));
 	return result;
 }
 
@@ -196,7 +193,7 @@ Matrix operator-(Matrix a,Matrix b){
 	Matrix result(a.Rows(),a.Cols());
 	for(int i = 0 ; i < a.Rows() ; i++)
 		for( int j = 0 ; j < a.Cols() ; j++)
-			result.Set(j,i,a.Get(j,i) - b.Get(j,i));
+			result.Set(i,j,a.Get(i,j) - b.Get(i,j));
 	return result;
 }
 
@@ -212,7 +209,7 @@ Matrix operator/(Matrix a,double b){
 	Matrix result(a.Rows(),a.Cols());
 	for( int i = 0 ; i < a.Rows() ; i++ ){
 		for( int j = 0 ; j < a.Cols() ; j++ ){
-			result.Set(j,i,a.Get(j,i) / b);
+			result.Set(i,j,a.Get(i,j) / b);
 		}
 	}
 	return result;
@@ -222,7 +219,7 @@ Matrix operator*(Matrix a,double b){
 	Matrix result(a.Rows(),a.Cols());
 	for( int i = 0 ; i < a.Rows() ; i++ ){
 		for( int j = 0 ; j < a.Cols() ; j++ ){
-			result.Set(j,i,a.Get(j,i) * b);
+			result.Set(i,j,a.Get(i,j) * b);
 		}
 	}
 	return result;
@@ -367,8 +364,8 @@ double Matrix::det(void) {
 	double det = 0;
 	
 	det = Get(0,0) * Get(1,1) * Get(2,2);
-	det-= Get(0,0) * Get(1,2) * Get(2,2);
-	det-= Get(0,2) * Get(1,0) * Get(2,2);
+	det-= Get(0,0) * Get(1,2) * Get(2,1);
+	det-= Get(0,1) * Get(1,0) * Get(2,2);
 	det+= Get(0,1) * Get(1,2) * Get(2,0);
 	det+= Get(0,2) * Get(1,0) * Get(2,1);
 	det-= Get(0,2) * Get(1,1) * Get(2,0);
@@ -389,7 +386,7 @@ Matrix Matrix::inv(void) {
 	inverse.Set(1,2,(Get(0,2)*Get(1,0)) - (Get(0,0)*Get(1,2)));
 	
 	inverse.Set(2,0,(Get(1,0)*Get(2,1)) - (Get(1,1)*Get(2,0)));
-	inverse.Set(2,1,(Get(0,1)*Get(3,0)) - (Get(0,0)*Get(2,1)));
+	inverse.Set(2,1,(Get(0,1)*Get(2,0)) - (Get(0,0)*Get(2,1)));
 	inverse.Set(2,2,(Get(0,0)*Get(1,1)) - (Get(0,1)*Get(1,0)));
 	
 	inverse = inverse * (1.0 / (*this).det());

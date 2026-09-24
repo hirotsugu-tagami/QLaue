@@ -28,6 +28,7 @@
 #include <QtWidgets>
 #include <QtPrintSupport>
 #include <QAbstractItemView>
+#include <QImageReader>
 
 #ifdef Q_WS_MAC
 #include <Carbon/Carbon.h>
@@ -190,7 +191,7 @@ void MainWindow::createConnections(void){
 	
 	// Connections for the rotate dialog
 	
-	connect(rotate, SIGNAL(valueChanged(double,double,double)), this, SLOT(rotateCrystal(double,double,double)));
+	connect(rotate, SIGNAL(valueChanged(double,double,double)), this, SLOT(rotateCrystalBy(double,double,double)));
 			
 	// Allow lauewidget to rotate the crystal
 	
@@ -738,26 +739,32 @@ void MainWindow::aquiredImageAvaliable(void){
 }
 
 void MainWindow::importImage(void){
+	QStringList imagePatterns;
+	foreach (const QByteArray &format, QImageReader::supportedImageFormats()) {
+		imagePatterns << "*." + QString::fromLatin1(format);
+	}
+	const QString imageFilter = tr("Images (%1);;All Files (*)")
+		.arg(imagePatterns.join(" "));
 	QString s = QFileDialog::getOpenFileName(this,
-											 "Choose Image",
+											 tr("Choose Image"),
 											 currentWorkingDir,
-											 "Images (*.png *.xpm *.jpg *.tif *.tiff)");
-	if(s == NULL)
+											 imageFilter);
+	if(s.isEmpty())
 		return;
 	
-	QImage pixmap;
+	QImageReader reader(s);
+	QImage pixmap = reader.read();
 	
-	if(pixmap.load(s) != true){
+	if(pixmap.isNull()){
 		// Could not import image 
 		QMessageBox::warning(this,
-							 "Import Image",
-							 "There was an error in importing the image",
-							 QMessageBox::Ok,
-							 QMessageBox::NoButton,
-							 QMessageBox::NoButton);
+							 tr("Import Image"),
+							 tr("Could not read image \"%1\":\n%2")
+							 .arg(QFileInfo(s).fileName(), reader.errorString()));
 		return;
 	}
 	
+	currentWorkingDir = QFileInfo(s).absolutePath();
 	film->setImage(pixmap, true);
 	QString imageInfo = QString("%1 x %2 pixels").arg(pixmap.width()).arg(pixmap.height());
 	imagecontrols->setImageInfo(imageInfo);
@@ -765,7 +772,7 @@ void MainWindow::importImage(void){
 	imagecontrols->setDefaults();
 	statusBar()->showMessage(QString("Imported %1 (%2 x %3 pixels) (%4 pixels.mm^-1).")
 							.arg(strippedName(s)).arg(pixmap.width()).arg(pixmap.height())
-							.arg(pixmap.dotsPerMeterY() * 1e3), 5000);
+							.arg(pixmap.dotsPerMeterY() / 1e3), 5000);
 }
 
 void MainWindow::printAction(void){

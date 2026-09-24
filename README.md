@@ -49,6 +49,82 @@ Deployment, code signing and runtime testing are separate steps. This repository
 does not contain a notarized release or claim that the generated app is ready
 for public distribution.
 
+## Image Import and Checks
+
+Use **Laue > Import Image** to open a bitmap. The image picker lists formats
+supported by the running Qt installation, including BMP, and provides **All
+Files** for images with unusual or missing extensions. Optional formats such as
+TIFF depend on the installed image plugins. A failed import reports the decoder
+error and keeps the existing image.
+
+To run the image import regression check with Qt 5, from the repository root:
+
+```sh
+mkdir -p build-image-check
+cd build-image-check
+"$QT_BIN/qmake" ../tests/image_import.pro
+make -j4
+QT_QPA_PLATFORM=offscreen ./image-import-check
+```
+
+The check exercises the application's import dialog and image-loading slot with
+BMP (including indexed and monochrome images), PNG, JPEG, TIFF when available,
+Japanese file names, cancellation and invalid input. It uses Qt's non-native
+dialog for unattended execution; macOS's native file picker needs a separate
+interactive check.
+
+## Import a Crystal from CIF
+
+Open **Set Lattice**, click **Import CIF...**, and select the CIF file. The dialog
+fills the six cell parameters, space group, description and fractional atom
+coordinates. Review the values and click **OK** to apply them. **Cancel** leaves
+the current crystal unchanged; a failed import also preserves the editor contents.
+The existing crystal orientation is retained when the lattice is applied.
+
+The importer supports conventional small-molecule/inorganic CIF 1.1 structure
+files: quoted and multiline values, comments, reordered atom-loop columns,
+uncertainties such as `5.431(2)`, scientific notation and H through Cf. It uses
+Hall symbols, Hermann–Mauguin symbols or IT numbers with the application's space
+group table. Supplied symmetry operations are checked against the selected
+setting; cell metrics distinguish hexagonal/rhombohedral axes. If operations or
+a Hall symbol are absent and multiple settings remain, the first matching
+database setting is selected, so check the setting in the dialog.
+
+One structure per file is supported (unrelated metadata blocks are allowed).
+For multiple structures, export a single data block first. CIF 2.0, partial
+occupancies, unknown elements/coordinates and settings absent from the internal
+table produce an explanatory error. Zero-occupancy sites are skipped. Atom
+displacement parameters are not imported because QLaue has no corresponding
+model. Atom counts are conservatively limited so their symmetry equivalents
+fit the existing 2048-atom storage. Files are limited to 16 MiB.
+
+The parser follows the [IUCr CIF 1.1 syntax](https://www.iucr.org/resources/cif/spec/version1.1/cifsyntax).
+No additional runtime library or Python installation is needed.
+
+The **Crystal Rotations** X/Y/Z arrows apply the chosen step on every click,
+including in goniometer mode. Reorientation commands that set an absolute angle
+keep their existing behavior.
+
+To run the CIF and repeated-rotation regression checks:
+
+```sh
+mkdir -p build-crystal-check
+cd build-crystal-check
+"$QT_BIN/qmake" ../tests/crystal_features.pro
+make -j4
+QT_QPA_PLATFORM=offscreen ./crystal-features-check
+```
+
+These checks exercise real Qt controls with the non-native file dialog. They
+cover CIF validation, failed/cancelled imports, 51 atom sites, hydrogen, trigonal
+symmetry, triclinic reciprocal geometry and repeated positive/negative rotation
+on all three axes in both rotation modes.
+
+See [the September 2026 audit](docs/AUDIT-2026-09-24.md) for finding status,
+evidence, reproduction commands and the scope of verification. The follow-up
+fixes resolve the matrix memory defects, crystal name/rotation state and atom
+editor defects; other persistence, threading and scientific findings remain.
+
 ## Repository Contents
 
 The C++ sources, Qt Designer `.ui` files, project configuration and image/icon

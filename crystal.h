@@ -115,6 +115,11 @@ private:
 	void calcRlattice(void);
 	
 public:	
+	enum { MaxAtoms = 2048 };
+	static bool isValidLattice(double a, double b, double c,
+							   double alpha, double beta, double gamma);
+	int maxRootAtoms() const;
+
 	// Constructors	
 		
 	Crystal();

@@ -29,7 +29,7 @@ TARGET = QLaue
 #CONFIG += x86_64 x86
 CONFIG += x86_64
 
-CONFIG += release
+CONFIG += release c++11
 
 QT += xml network widgets printsupport
 
@@ -50,6 +50,7 @@ RCC_DIR = res
 
 # Input
 HEADERS += aboutbox.h \
+           cifreader.h \
            atom.h \
            crystal.h \
            crystaldialog.h \
@@ -96,6 +97,7 @@ FORMS += aboutbox.ui \
 	 pslcamera2.ui \
 	 pslcamera3.ui
 SOURCES += aboutbox.cpp \
+           cifreader.cpp \
            atom.cpp \
            crystal.cpp \
            crystaldialog.cpp \

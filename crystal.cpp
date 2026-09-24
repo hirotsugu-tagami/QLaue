@@ -30,6 +30,7 @@
 #include <fstream>
 #include <stdio.h>
 #include <string.h>
+#include <cmath>
 #include "matrix.h"
 #include "atom.h"
 #include "crystal.h"
@@ -38,17 +39,11 @@
 
 Matrix Crystal::getGenerator(spacegroup *sg, int gennum) {
 	Matrix gen(3,4);
-	int n=0;
-	
-	for(int c=0 ; c<4 ;c++){
-		for(int r=0 ; r<3 ;r++){
-			if(c == 3){
-				gen.Set(r,c,(double)sg->matrix[gennum][n] / (double)Crystal::STBF);
-			} else {
-				gen.Set(r,c,sg->matrix[gennum][n]);
-			}
-			n++;
-		}
+	// The table stores a row-major 3x3 rotation followed by three translations.
+	for(int r=0; r<3; ++r){
+		for(int c=0; c<3; ++c)
+			gen.Set(r,c,sg->matrix[gennum][r*3+c]);
+		gen.Set(r,3,(double)sg->matrix[gennum][9+r] / Crystal::STBF);
 	}
 	return gen;
 }
@@ -60,12 +55,13 @@ UB(3,3), UBinv(3,3),
 R(3,3), Rinv(3,3),
 name(NULL)
 {
-	atoms = new Atom[2048];
+	atoms = new Atom[MaxAtoms];
 	natoms = 0;
 	natoms_sggen = 0;
 	sg = &spacegroups[0];
 
-	freeRotate = freeRotate;
+	freeRotate = true;
+	gonioX = gonioY = gonioZ = 0;
 	
 	U.identity();
 	R.identity();
@@ -82,7 +78,7 @@ UB(3,3), UBinv(3,3),
 R(3,3), Rinv(3,3),
 name(NULL)
 {
-	atoms = new Atom[2048];
+	atoms = new Atom[MaxAtoms];
 	natoms = C.natoms;
 	natoms_sggen = C.natoms_sggen;
 	
@@ -92,12 +88,7 @@ name(NULL)
 	
 	// Now the name
 	
-	if(C.name == NULL){
-		name = NULL;
-	} else {
-		name = new char[strlen(C.name)];
-		strcpy(name,C.name);
-	}
+	setName(C.name);
 	
 	// Lattice parameters
 	
@@ -129,6 +120,9 @@ name(NULL)
 	sg = C.sg;
 	
 	freeRotate = C.freeRotate;
+	gonioX = C.gonioX;
+	gonioY = C.gonioY;
+	gonioZ = C.gonioZ;
 	
 	B = C.B;
 	Binv = C.Binv;	
@@ -148,6 +142,8 @@ Crystal::~Crystal(void) {
 }
 
 Crystal& Crystal::operator=(const Crystal &C) {
+	if(this == &C)
+		return *this;
 	// Copy the atoms across
 	
 	natoms = C.natoms;
@@ -158,12 +154,7 @@ Crystal& Crystal::operator=(const Crystal &C) {
 	
 	// Now the name
 	
-	if(C.name == NULL){
-		name = NULL;
-	} else {
-		name = new char[strlen(C.name)];
-		strcpy(name,C.name);
-	} 
+	setName(C.name);
 	
 	// Lattice parameters
 	
@@ -195,6 +186,9 @@ Crystal& Crystal::operator=(const Crystal &C) {
 	sg = C.sg;
 	
 	freeRotate = C.freeRotate;
+	gonioX = C.gonioX;
+	gonioY = C.gonioY;
+	gonioZ = C.gonioZ;
 	
 	B = C.B;
 	Binv = C.Binv;
@@ -229,6 +223,29 @@ void Crystal::setLattice(double newa,  double newb, double newc,
 	
 	calcRlattice();
 	calcUB();
+}
+
+bool Crystal::isValidLattice(double a, double b, double c,
+							 double alpha, double beta, double gamma){
+	if(!std::isfinite(a) || !std::isfinite(b) || !std::isfinite(c) ||
+	   !std::isfinite(alpha) || !std::isfinite(beta) || !std::isfinite(gamma) ||
+	   a <= 0 || b <= 0 || c <= 0 || !std::isfinite(a*b*c) || a*b*c <= 0 ||
+	   alpha <= 0 || alpha >= M_PI || beta <= 0 || beta >= M_PI ||
+	   gamma <= 0 || gamma >= M_PI)
+		return false;
+	double ca = cos(alpha), cb = cos(beta), cg = cos(gamma);
+	return 1 - ca*ca - cb*cb - cg*cg + 2*ca*cb*cg > 1e-12;
+}
+
+int Crystal::maxRootAtoms() const {
+	// Conservative bound: reserve space for every symmetry equivalent site.
+	int centering = 1;
+	switch(sg->LatticeType){
+		case 'F': centering = 4; break;
+		case 'R': centering = 3; break;
+		case 'A': case 'B': case 'C': case 'I': centering = 2; break;
+	}
+	return MaxAtoms / (sg->ngenerators * centering);
 }
 
 double Crystal::getLatticeA(void){
@@ -299,7 +316,10 @@ void Crystal::calcRlattice(void) {
 	
 	cosalphas = (cos(beta)*cos(gamma) - cos(alpha)) / (sin(beta) * sin(gamma));
 	cosbetas = (cos(alpha)*cos(gamma) - cos(beta)) / (sin(alpha) * sin(gamma));
-	cosgammas = (cos(alpha)*cos(gamma) - cos(gamma)) / (sin(beta) * sin(beta));
+	cosgammas = (cos(alpha)*cos(beta) - cos(gamma)) / (sin(alpha) * sin(beta));
+	alphas = atan2(sinalphas, cosalphas);
+	betas = atan2(sinbetas, cosbetas);
+	gammas = atan2(singammas, cosgammas);
 	
 	volume*=abc;
 	
@@ -774,14 +794,13 @@ void Crystal::sgApplyCenter(Matrix v){
 // ***************************************************************************************
 
 void Crystal::setName(const char *txt){
-	// First free up the memory
-	
-	if(name != NULL)
-		delete [] name;
-	
-	name = new char[strlen(txt)];
-	
-	strcpy(name,txt);
+	char *replacement = NULL;
+	if(txt != NULL){
+		replacement = new char[strlen(txt) + 1];
+		strcpy(replacement,txt);
+	}
+	delete [] name;
+	name = replacement;
 }
 
 char* Crystal::getName(void){
