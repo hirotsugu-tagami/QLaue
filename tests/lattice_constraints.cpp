@@ -15,7 +15,7 @@ static const char *fieldNames[] = {"LatticeA", "LatticeB", "LatticeC",
 static void require(bool ok, const QString &message) {
     if(!ok) { qCritical().noquote() << "FAIL:" << message; std::exit(1); }
 }
-static void near(double actual, double expected, const QString &message) {
+static void requireNear(double actual, double expected, const QString &message) {
     require(std::isfinite(actual) && std::abs(actual-expected) < 1e-10,
             message + QString(" (actual %1, expected %2)").arg(actual,0,'g',15).arg(expected,0,'g',15));
 }
@@ -41,23 +41,23 @@ static Crystal crystalWith(const Cell &cell) {
     return crystal;
 }
 static void checkFields(CrystalDialog &dialog, const Cell &expected) {
-    for(int i=0; i<6; ++i) near(field(dialog,i)->text().toDouble(),expected[i],fieldNames[i]);
+    for(int i=0; i<6; ++i) requireNear(field(dialog,i)->text().toDouble(),expected[i],fieldNames[i]);
 }
 static void checkCrystal(Crystal &actual, Crystal &expected) {
     const Cell a=cellOf(actual), b=cellOf(expected);
-    for(int i=0; i<6; ++i) near(a[i],b[i],QString("Crystal changed: %1").arg(fieldNames[i]));
+    for(int i=0; i<6; ++i) requireNear(a[i],b[i],QString("Crystal changed: %1").arg(fieldNames[i]));
     require(actual.getSpaceGroup()->index==expected.getSpaceGroup()->index,"Space-group setting changed");
     require(QString::fromUtf8(actual.getName())==QString::fromUtf8(expected.getName()),"Name changed");
     require(actual.getNRootAtoms()==expected.getNRootAtoms(),"Root sites changed");
     for(int i=0; i<expected.getNRootAtoms(); ++i) {
         require(actual.getAtom(i)->getZ()==expected.getAtom(i)->getZ(),"Element changed");
-        near(actual.getAtom(i)->getXPos(),expected.getAtom(i)->getXPos(),"Atom x changed");
-        near(actual.getAtom(i)->getYPos(),expected.getAtom(i)->getYPos(),"Atom y changed");
-        near(actual.getAtom(i)->getZPos(),expected.getAtom(i)->getZPos(),"Atom z changed");
+        requireNear(actual.getAtom(i)->getXPos(),expected.getAtom(i)->getXPos(),"Atom x changed");
+        requireNear(actual.getAtom(i)->getYPos(),expected.getAtom(i)->getYPos(),"Atom y changed");
+        requireNear(actual.getAtom(i)->getZPos(),expected.getAtom(i)->getZPos(),"Atom z changed");
     }
     const Matrix aU=actual.getU(), bU=expected.getU();
     for(int i=0; i<3; ++i) for(int j=0; j<3; ++j)
-        near(aU.Get(i,j),bU.Get(i,j),"Orientation changed");
+        requireNear(aU.Get(i,j),bU.Get(i,j),"Orientation changed");
 }
 static void clickSystem(CrystalDialog &dialog, const char *name) {
     auto *button=dialog.findChild<QRadioButton *>(name);
@@ -99,7 +99,7 @@ static void checkApplied(CrystalDialog &dialog, const Cell &expected, int number
     Crystal output;
     dialog.getCrystal(&output);
     const Cell actual=cellOf(output);
-    for(int i=0; i<6; ++i) near(actual[i],expected[i],"Applied lattice differs from editor");
+    for(int i=0; i<6; ++i) requireNear(actual[i],expected[i],"Applied lattice differs from editor");
     require(output.getSpaceGroup()->number==number && QString(output.getSpaceGroup()->Extn)==setting,
             "Applied the wrong space-group setting");
 }

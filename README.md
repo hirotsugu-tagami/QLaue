@@ -11,8 +11,8 @@ and Windows.
 
 | Platform | Installer | Installation |
 | --- | --- | --- |
-| Windows 10/11, x64 | [QLaue-windows-x64-setup.exe](https://github.com/hirotsugu-tagami/QLaue/releases/download/preview-2026-10-26/QLaue-windows-x64-setup.exe) | Run the setup wizard, then open QLaue from the Start menu. |
-| macOS, Apple Silicon | [QLaue-macos-arm64.dmg](https://github.com/hirotsugu-tagami/QLaue/releases/download/preview-2026-10-26/QLaue-macos-arm64.dmg) | Open the disk image and drag QLaue.app to Applications. |
+| Windows 10/11, x64 | [QLaue-windows-x64-setup.exe](https://github.com/hirotsugu-tagami/QLaue/releases/download/preview-2026-10-26-r1/QLaue-windows-x64-setup.exe) | Run the setup wizard, then open QLaue from the Start menu. |
+| macOS, Apple Silicon | [QLaue-macos-arm64.dmg](https://github.com/hirotsugu-tagami/QLaue/releases/download/preview-2026-10-26-r1/QLaue-macos-arm64.dmg) | Open the disk image and drag QLaue.app to Applications. |
 
 Save your analysis and close the old application before upgrading. Qt and the
 required runtime libraries are included; no separate Qt, Conda or Python
@@ -21,7 +21,7 @@ without administrator privileges and provides an uninstaller. The macOS build
 is for Apple Silicon (arm64), with a macOS 11.0 deployment target, checked on
 macOS 26.7.1. An Intel Mac build is not included.
 
-See the [release notes and checksums](https://github.com/hirotsugu-tagami/QLaue/releases/tag/preview-2026-10-26)
+See the [release notes and checksums](https://github.com/hirotsugu-tagami/QLaue/releases/tag/preview-2026-10-26-r1)
 for the source revision and validation details.
 
 These are **prereleases**. The [current fix record](docs/FIXES-2026-10-26-APP-FUNCTIONS.md)
