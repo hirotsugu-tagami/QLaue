@@ -58,6 +58,10 @@ private:
 	double lambda_min, lambda_max;
 	double det_sat, det_thresh;
 	double distance;
+	int precision = 5, corrections = 1023, tubeZ = 29, polarization = XRay::PolnSigma;
+	bool intensities = true;
+	int brightness = 0, contrast = 100, maximum = 255, minimum = 0;
+	bool inverted = false, rotated = false, imageDisplayed = true;
 	
 public:
 	DataFile();
@@ -68,6 +72,7 @@ public:
 	bool read(QString filename);
 	bool readCif(QString filename);
 	bool readCel(QString filename);
+	QByteArray documentState() const;
 	
 	// Error handling
 	
@@ -81,6 +86,7 @@ public:
 	Crystal getCrystal();
 	void setLaue(LaueFilm *film);
 	void getLaue(LaueFilm *laue);
+	void applyImageSettings(LaueFilm *film) const;
 	QImage getLaueImage(void);
 
 	double originX(void)		{ return ox; }
@@ -91,15 +97,7 @@ private:
 	
 	// Parsers for data
 	
-	void parse(void);
-	void parseExperiment(QDomNode n);
-	void parseCrystal(QDomNode n);
-	void parseAtoms(QDomNode n);
-	void parseSpacegroup(QDomNode n);
-	void parseLaue(QDomNode n);
-	void parseOrientation(QDomNode n);
-	void parseParameters(QDomNode n);
-	void parseLaueImage(QDomNode n);
+	bool parse();
 };
 
 #endif

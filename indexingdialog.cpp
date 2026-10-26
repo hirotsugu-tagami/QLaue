@@ -29,6 +29,32 @@
 
 IndexingDialog::IndexingDialog(QWidget *parent) : QDialog(parent) {
 	ui.setupUi(this);
+	for(QLineEdit *edit : {ui.maxH,ui.maxK,ui.maxL}) {
+		edit->setValidator(new QIntValidator(0,lauegram::MaxIndexingRange,edit));
+		edit->setToolTip(tr("Maximum absolute index for all matched spots (0 to %1). Larger ranges take longer.").arg(lauegram::MaxIndexingRange));
+	}
+	for(QLineEdit *edit : {ui.angTol,ui.spotAccuracy}) {
+		auto *validator = new QDoubleValidator(0,edit == ui.angTol ? 89.999 : 1000,6,edit);
+		validator->setLocale(QLocale::c());
+		validator->setNotation(QDoubleValidator::ScientificNotation);
+		edit->setValidator(validator);
+	}
+}
+
+void IndexingDialog::accept() {
+	for(QLineEdit *edit : {ui.maxH,ui.maxK,ui.maxL,ui.angTol,ui.spotAccuracy}) {
+		if(!edit->hasAcceptableInput()) {
+			QMessageBox::warning(this,tr("Indexing Parameters"),tr("Enter valid search ranges and positive tolerances."));
+			edit->setFocus();
+			return;
+		}
+	}
+	if(ui.maxH->text().toInt()+ui.maxK->text().toInt()+ui.maxL->text().toInt() == 0 ||
+	   ui.angTol->text().toDouble() <= 0 || ui.spotAccuracy->text().toDouble() <= 0) {
+		QMessageBox::warning(this,tr("Indexing Parameters"),tr("At least one search range and both tolerances must be greater than zero."));
+		return;
+	}
+	QDialog::accept();
 }
 
 void IndexingDialog::setIndexingParams(lauegram *laue){

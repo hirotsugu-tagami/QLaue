@@ -41,6 +41,7 @@ private:
 public slots:
 	void changed(void);
 	void setDefaults(void);
+	void setValues(int brightness, int contrast, int maximum, int minimum);
 	void setScrollbarsEnabled(bool yesno);
 	void setImageInfo(QString text);
 signals:

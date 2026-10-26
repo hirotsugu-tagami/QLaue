@@ -11,21 +11,22 @@ and Windows.
 
 | Platform | Installer | Installation |
 | --- | --- | --- |
-| Windows 10/11, x64 | [QLaue-windows-x64-setup.exe](https://github.com/hirotsugu-tagami/QLaue/releases/download/preview-2026-09-24-r4/QLaue-windows-x64-setup.exe) | Run the setup wizard, then open QLaue from the Start menu. |
-| macOS, Apple Silicon | [QLaue-macos-arm64.dmg](https://github.com/hirotsugu-tagami/QLaue/releases/download/preview-2026-09-24-r4/QLaue-macos-arm64.dmg) | Open the disk image and drag QLaue.app to Applications. |
+| Windows 10/11, x64 | [QLaue-windows-x64-setup.exe](https://github.com/hirotsugu-tagami/QLaue/releases/download/preview-2026-10-26/QLaue-windows-x64-setup.exe) | Run the setup wizard, then open QLaue from the Start menu. |
+| macOS, Apple Silicon | [QLaue-macos-arm64.dmg](https://github.com/hirotsugu-tagami/QLaue/releases/download/preview-2026-10-26/QLaue-macos-arm64.dmg) | Open the disk image and drag QLaue.app to Applications. |
 
 Save your analysis and close the old application before upgrading. Qt and the
 required runtime libraries are included; no separate Qt, Conda or Python
 installation is needed. The Windows installer installs for the current user
 without administrator privileges and provides an uninstaller. The macOS build
 is for Apple Silicon (arm64), with a macOS 11.0 deployment target, checked on
-macOS 26.6.2. An Intel Mac build is not included.
+macOS 26.7.1. An Intel Mac build is not included.
 
-See the [release notes and checksums](https://github.com/hirotsugu-tagami/QLaue/releases/tag/preview-2026-09-24-r4)
+See the [release notes and checksums](https://github.com/hirotsugu-tagami/QLaue/releases/tag/preview-2026-10-26)
 for the source revision and validation details.
 
-These are **prereleases** with outstanding findings listed in
-[the audit report](docs/AUDIT-2026-09-24.md). The Windows installer is not
+These are **prereleases**. The [current fix record](docs/FIXES-2026-10-26-APP-FUNCTIONS.md)
+describes the resolved findings and validation limits; earlier audit reports retain
+their historical findings. The Windows installer is not
 Authenticode-signed. The macOS app has an ad-hoc signature and has not been
 signed with an Apple Developer ID or notarized. If macOS blocks the first launch,
 verify the download source and follow
@@ -183,7 +184,74 @@ rotation on all three axes in both rotation modes.
 See [the September 2026 audit](docs/AUDIT-2026-09-24.md) for finding status,
 evidence, reproduction commands and the scope of verification. The follow-up
 fixes resolve the matrix memory defects, crystal name/rotation state and atom
-editor defects; other persistence, threading and scientific findings remain.
+editor defects. The [September 27 follow-up](docs/AUDIT-2026-09-27-FIXES.md)
+records the subsequent persistence, worker, numerical and image-state fixes.
+The [September 28 follow-up](docs/AUDIT-2026-09-28-FIXES.md) records fixes for
+all ten findings from the subsequent audit, including calibration cancellation,
+fixed beam position during scale changes, hidden-image printing and settings round trips.
+Those changes are included in the October 26 installers linked above.
+The [October 26 fix report](docs/FIXES-2026-10-26-APP-FUNCTIONS.md) records the
+subsequent seven app-function fixes: analysis invalidation, camera controls,
+orientation reset, dock visibility and print settings/output.
+
+## Solve the Crystal Orientation
+
+The October 26 installers include the indexing changes described in this section.
+
+**Laue > Solve Orientation** indexes manually selected reflections using the
+known lattice and detector geometry. Load the lattice (for example using
+**Set Lattice > Import CIF**) and image, then set the beam center, image scale,
+sample-to-detector distance and wavelength range before starting.
+
+1. Click at least two distinct, separated reflections. Additional spots help
+   distinguish ambiguous candidates. Up to 100 spots can be selected.
+2. Press **Enter** to search; **Backspace/Delete** removes the last selection.
+   **Esc** also finishes selection and opens the search parameters, as before.
+3. Set maximum absolute **H, K, L** (0–20 per axis), angular tolerance in degrees
+   and spot tolerance in millimeters. The index limits apply to **all matched
+   spots**, including those used to check each candidate. Larger ranges take
+   longer. The search does not depend on the display's Accuracy setting.
+4. Review the **Indexing Display**. Candidates are ranked by the number of
+   matched observations (**Hits**), then the root-mean-square position error
+   of those matches (**RMS (mm)**). Select a row to apply its orientation.
+   A completed search does not automatically change the crystal orientation.
+   **Resolve Orientation** searches again using the existing selections.
+
+The first two observations define each candidate; the remaining observations
+check it. Distances use a circular tolerance, and nearest unused predictions
+are assigned to observations so that one calculated spot cannot produce multiple
+hits. If there are more than 1000 candidates, only the best 1000 are retained
+and the film reports this limit. Cancel stops the worker and retains the
+previous results and crystal orientation.
+
+Replacing or transposing the image, changing its beam center or scale, or using
+Reset clears the selected reflections and orientation candidates. Select the
+reflections again with **Solve Orientation**. Changing the detector distance or
+wavelength range clears the candidate scores while keeping the selected points;
+use **Resolve Orientation** to search with the new settings. Image brightness,
+contrast, inversion and visibility changes keep the selections.
+
+This is a position-based, semi-automatic search. It checks whether a fundamental
+reflection or one of its harmonics lies in the wavelength range. It does not
+filter candidates using the legacy intensity model; systematic absences and
+experimental intensities still need review. Symmetry-equivalent orientations
+can appear separately. Automatic spot detection, least-squares refinement of
+orientation/geometry and refinement of atomic coordinates are not included.
+
+Run the indexing regression check with Qt 5:
+
+```sh
+mkdir -p build-indexing-check
+cd build-indexing-check
+"$QT_BIN/qmake" ../tests/indexing.pro
+make -j4
+QT_QPA_PLATFORM=offscreen ./indexing-check
+```
+
+It covers known cubic, hexagonal and triclinic orientations, noisy positions,
+an unmatched observation, unique matches, wavelength harmonics, invalid inputs,
+bounded candidate storage, cancellation/restart and the Qt selection/result flow.
+The Windows installer recipe runs this check with the native Windows platform.
 
 ## Print or Save the Analysis as PDF
 
@@ -209,6 +277,42 @@ The check creates synthetic marker images, screen references, print rasters and
 PDFs. It verifies that the calculated spot overlaps the imported marker and
 that printing preserves the screen's image scale. Generated PDFs should also
 be rendered and visually checked, for example with Poppler's `pdftoppm`.
+
+## Save and Reopen an Analysis
+
+**File > Save / Save As** writes an XTL analysis containing the crystal, source
+atom coordinates, orientation, detector/wavelength settings, calculation accuracy
+and intensity corrections, and the imported image with its scale, origin and
+image adjustments. Brightness, contrast, minimum/maximum, inversion and image
+rotation are restored on reopening. New optional attributes preserve compatibility
+with older XTL files; missing settings use defined defaults.
+
+New, Open, recent files, CIF/CEL structure imports and closing the window offer
+**Save / Discard / Cancel** when the analysis has changed. Failed saves or imports
+leave the current analysis in place. Saving uses an atomic file replacement,
+and an invalid analysis cannot overwrite a valid file. New clears the previous
+save destination.
+
+The [September 27 fix report](docs/AUDIT-2026-09-27-FIXES.md) maps the audited
+findings to changes, tests and remaining validation limits. Additional Qt 5 checks
+are `tests/numerics.pro`, `tests/persistence.pro`, `tests/audit_fixes.pro`,
+`tests/image_state.pro`, `tests/settings_regressions.pro`,
+`tests/lattice_constraints.pro`, `tests/camera.pro` and `tests/app_controls.pro`;
+build them like the checks above.
+Their executable names are `numerics-check`, `persistence-check`,
+`audit-fixes-check`, `image-state-check`, `settings-regressions-check`,
+`lattice-constraints-check`, `camera-check` and `app-controls-check`. The camera check uses
+a local test server, not a physical detector. The Windows packaging recipe runs
+these checks before producing an installer.
+
+**Laue > Reset Orientation** restores the current lattice's initial alignment:
+100 along the beam axis and 001 in the camera-side plane. It clears goniometer
+angles and indexing selections while retaining the crystal, image and calibration.
+
+The **Camera Controls** dock and **Laue > Camera Setup** share the binning and
+exposure settings. **Snap!** and **Laue > Aquire Image** use the same acquisition
+path; the dock shows status and prevents a second request while an acquisition
+is running. Exposure time is entered in seconds.
 
 ## Repository Contents
 

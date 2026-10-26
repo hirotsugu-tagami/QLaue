@@ -94,6 +94,12 @@ int main(int argc, char **argv)
         importFile(window, path);
         require(film->importedImage->size() == source.size(), "Wrong imported size");
         require(*film->importedImage == QImage(path), "Imported pixels changed");
+        auto *show=window.findChild<QAction *>("actionShow_Image");
+        require(show && show->isChecked() && film->isImageDisplayed(),"Import did not synchronize image visibility");
+        show->trigger();
+        require(!show->isChecked() && !film->isImageDisplayed(),"First Show Image toggle did not hide the imported image");
+        show->trigger();
+        require(show->isChecked() && film->isImageDisplayed(),"Second Show Image toggle did not restore the image");
         qInfo() << "PASS import" << suffix;
     }
 

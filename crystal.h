@@ -96,17 +96,17 @@ private:
 	
 	// Spacegroup Centering
 	
-	void sgFaceCenter(void);
-	void sgBodyCenter(void);
-	void sgACenter(void);
-	void sgBCenter(void);
-	void sgCCenter(void);
-	void sgRhomb(void);
-	void sgApplyCenter(Matrix v);
+	bool sgFaceCenter(void);
+	bool sgBodyCenter(void);
+	bool sgACenter(void);
+	bool sgBCenter(void);
+	bool sgCCenter(void);
+	bool sgRhomb(void);
+	bool sgApplyCenter(Matrix v);
 	
 	Matrix getGenerator(spacegroup *sg, int gennum);
-	bool sgInsertAtom(const Atom a, const Matrix pos);
-	void sgTransform(void);
+	int sgInsertAtom(Atom a, const Matrix pos);
+	bool sgTransform(void);
 	Matrix getAtom4(int i);
 	
 	void setGoniometer(void);
@@ -163,11 +163,11 @@ public:
 							
 	// Crystal Orientation
 	
-	void setU(double h1, double k1, double l1,
+	bool setU(double h1, double k1, double l1,
 			  double h2, double k2, double l2);
 	void setU(const Matrix newU);
-	void setU(Matrix Primary, Matrix Secondary);
-	void setU(Matrix Primary, Matrix Secondary, Matrix PrimaryHKL, Matrix SecondaryHKL);
+	bool setU(Matrix Primary, Matrix Secondary);
+	bool setU(Matrix Primary, Matrix Secondary, Matrix PrimaryHKL, Matrix SecondaryHKL);
 	
 	// Rotation Routines
 	
@@ -183,7 +183,7 @@ public:
 	
 	// Atom operations
 	
-	void addAtom(int zn, double x, double y, double z);
+	bool addAtom(int zn, double x, double y, double z);
 	complex<double> calcXSFactor(double h, double k, double l, double sinthoverlambda, 
 								 double lambda);
 	complex<double> calcXSFactor(int h, int k, int l, double sinthoverlambda,
@@ -207,7 +207,7 @@ public:
 	bool setSpaceGroupIUC(const char *iucname);
 	bool setSpaceGroupNum(const int sgnum);
 	spacegroup* getSpaceGroup(void);
-	void spaceGroupGenerate(void);
+	bool spaceGroupGenerate(void);
 	
 	// Access to x-ray properties 
 	

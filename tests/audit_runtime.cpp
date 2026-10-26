@@ -1,4 +1,4 @@
-// Probes for unresolved findings. A nonzero exit indicates the defect persists.
+// Historical audit probes; current fixes are covered in depth by audit_fixes/persistence/numerics.
 #include <QApplication>
 #include <QSettings>
 #include <QTemporaryDir>
@@ -57,6 +57,15 @@ int main(int argc, char **argv)
         if (!data.write(path))
             return 2;
         film->setImage(image, true);
+        QTimer discard;
+        QObject::connect(&discard,&QTimer::timeout,[] {
+            if(auto *message=qobject_cast<QMessageBox *>(QApplication::activeModalWidget())) {
+                if(message->standardButtons().testFlag(QMessageBox::Discard))
+                    message->button(QMessageBox::Discard)->click();
+                else qFatal("Unexpected load error");
+            }
+        });
+        discard.start(10);
         QMetaObject::invokeMethod(&window, "loadCrystal", Qt::DirectConnection,
                                   Q_ARG(QString, path));
         if (probe == "stale-image") {
@@ -88,10 +97,14 @@ int main(int argc, char **argv)
         ReorientDialog dialog;
         dialog.setCrystal(crystal);
         dialog.setLaue(film->getLaue());
+        dialog.findChild<QRadioButton *>("ZoneButton")->setChecked(true);
+        const char *names[]={"XHLineEdit","XKLineEdit","XLLineEdit","ZHLineEdit","ZKLineEdit","ZLLineEdit"};
+        for(int i=0;i<6;++i) dialog.findChild<QLineEdit *>(names[i])->setText(i==0 || i==5 ? "1" : "0");
         QMetaObject::invokeMethod(&dialog, "go", Qt::DirectConnection);
         QTableWidget *table = dialog.findChild<QTableWidget *>("DataTable");
         if (!table || table->rowCount() != 8)
             return 2;
+        table->setCurrentCell(6,0);
         table->selectRow(6);
         QMetaObject::invokeMethod(&dialog, "okPressed", Qt::DirectConnection);
         qInfo() << "row 7 accepted" << dialog.getSelectedOrientation() << "; expected true";

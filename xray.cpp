@@ -42,6 +42,8 @@ using namespace std;
 
 XRay::XRay(){
 	poln = PolnSigma;
+	l = 0;
+	inten_corr = 0;
 }
 
 double XRay::getXf0(int Z, double sinth_over_lambda){
@@ -50,7 +52,7 @@ double XRay::getXf0(int Z, double sinth_over_lambda){
 	xf0 = xrayf0_c[Z-1];
 	
 	for(int i=0;i<5;i++){
-		xf0 = xf0 + xrayf0_a[Z-1][i]*exp(-1.0 * xrayf0_b[Z-1][i] * sinth_over_lambda);
+		xf0 = xf0 + xrayf0_a[Z-1][i]*exp(-1.0 * xrayf0_b[Z-1][i] * sinth_over_lambda * sinth_over_lambda);
 	}
 	return xf0;
 }
@@ -69,7 +71,7 @@ complex<double> XRay::getXf1f2(int Z, double lambda){
 			double f1step = xrayf1f2[Z-1].data[i][1] - xrayf1f2[Z-1].data[i-1][1];
 			double f2step = xrayf1f2[Z-1].data[i][2] - xrayf1f2[Z-1].data[i-1][2];
 			thisf1f2 = complex<double>(xrayf1f2[Z-1].data[i-1][1] + (f1step * efrac),
-									   -1.0 * xrayf1f2[Z-1].data[i-1][2] + (f2step * efrac));
+									   -1.0 * (xrayf1f2[Z-1].data[i-1][2] + f2step * efrac));
 			break;
 		}
 	}

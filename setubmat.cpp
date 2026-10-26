@@ -29,6 +29,7 @@
 #include "ui_setubmat.h"
 #include "setubmat.h"
 #include "version.h"
+#include <cmath>
 
 UMatrixDialog::UMatrixDialog(QWidget *parent) : 
 QDialog(parent), primary(3,1), secondary(3,1) {
@@ -37,38 +38,24 @@ QDialog(parent), primary(3,1), secondary(3,1) {
 }
 
 void UMatrixDialog::calcClicked(void){
-	primary.Set(0,0,ui.PH->text().toDouble());
-	primary.Set(1,0,ui.PK->text().toDouble());
-	primary.Set(2,0,ui.PL->text().toDouble());
-	secondary.Set(0,0,ui.SH->text().toDouble());
-	secondary.Set(1,0,ui.SK->text().toDouble());
-	secondary.Set(2,0,ui.SL->text().toDouble());
-	
-	// Check that the vectors are non-zero
-	
-	if(primary.mag() == 0){
-		QMessageBox::critical(	this, tr(APP_NAME),
-								tr("Primary vector is equal to zero.\n"),
-								QMessageBox::Cancel);
-		return;
-	}
-	
-	if(secondary.mag() == 0){
-		QMessageBox::critical(	this, tr(APP_NAME),
-								tr("Secondary vector is equal to zero.\n"),
-								QMessageBox::Cancel);
-		return;
-	}
-	
-	// Now check if they are paralell
-	
-	if(primary.dot(secondary) == (primary.mag() * secondary.mag())){
-		QMessageBox::critical(	this, tr(APP_NAME),
-								tr("Primary and Secondary vectors are paralell.\n"),
-								QMessageBox::Cancel);
-		return;
-	}
-	
+    QLineEdit *fields[] = {ui.PH,ui.PK,ui.PL,ui.SH,ui.SK,ui.SL};
+    bool numeric = true;
+    for(int i=0;i<6;++i) {
+        bool ok = false;
+        const double value = fields[i]->text().toDouble(&ok);
+        numeric = numeric && ok;
+        (i<3 ? primary : secondary).Set(i%3,0,value);
+    }
+    const double plen = std::hypot(std::hypot(primary.Get(0,0),primary.Get(1,0)),primary.Get(2,0));
+    const double slen = std::hypot(std::hypot(secondary.Get(0,0),secondary.Get(1,0)),secondary.Get(2,0));
+    if(!numeric || !std::isfinite(plen) || !std::isfinite(slen) || plen==0 || slen==0 ||
+       ((primary/plen) ^ (secondary/slen)).mag() < 1e-10) {
+        QMessageBox::critical(this,tr(APP_NAME),
+            tr("Enter finite, nonzero primary and secondary vectors that are not parallel or antiparallel."),
+            QMessageBox::Cancel);
+        return;
+    }
+
 	accept();
 }
 

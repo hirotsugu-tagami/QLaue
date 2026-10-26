@@ -32,6 +32,27 @@
 
 extern spacegroup spacegroups[];
 
+namespace {
+bool matchesCell(const spacegroup &group, const double *cell) {
+    // Keep the metric convention and 1e-3 tolerance used by cifreader.cpp's
+    // matchesCell: opening a supported, rounded CIF must not make it invalid.
+    const double metric[3][3] = {
+        {cell[0]*cell[0], cell[0]*cell[1]*std::cos(cell[5]), cell[0]*cell[2]*std::cos(cell[4])},
+        {cell[0]*cell[1]*std::cos(cell[5]), cell[1]*cell[1], cell[1]*cell[2]*std::cos(cell[3])},
+        {cell[0]*cell[2]*std::cos(cell[4]), cell[1]*cell[2]*std::cos(cell[3]), cell[2]*cell[2]}
+    };
+    for(int n=0; n<group.ngenerators; ++n) {
+        for(int i=0; i<3; ++i) for(int j=0; j<3; ++j) {
+            double transformed = 0;
+            for(int k=0; k<3; ++k) for(int l=0; l<3; ++l)
+                transformed += group.matrix[n][k*3+i] * metric[k][l] * group.matrix[n][l*3+j];
+            if(std::abs(transformed-metric[i][j]) > 1e-3 * cell[i] * cell[j]) return false;
+        }
+    }
+    return true;
+}
+}
+
 CrystalDialog::CrystalDialog() {
 	ui.setupUi(this);
 	ui.AtomsTable->setHorizontalHeaderLabels(QStringList() << tr("Element") << tr("x") << tr("y") << tr("z"));
@@ -48,7 +69,9 @@ CrystalDialog::CrystalDialog() {
 	connect(ui.TrigonalButton,SIGNAL(toggled(bool)),this,SLOT(latticeTypeChanged(bool)));
 	connect(ui.AllSpaceGroupsButton,SIGNAL(toggled(bool)),this,SLOT(latticeTypeChanged(bool)));
 	
-	connect(ui.LatticeA,SIGNAL(textChanged(const QString)),this,SLOT(latticeAChanged(const QString)));
+	connect(ui.LatticeA,SIGNAL(textChanged(const QString)),this,SLOT(syncLatticeConstraints()));
+	connect(ui.LatticeAlpha,SIGNAL(textChanged(const QString)),this,SLOT(syncLatticeConstraints()));
+	connect(ui.SpacegroupBox,SIGNAL(currentIndexChanged(int)),this,SLOT(syncLatticeConstraints()));
 	
 	ui.CubicButton->setChecked(true);
 	ui.DescriptionTextEdit->setAcceptRichText(false);
@@ -140,6 +163,7 @@ void CrystalDialog::setCrystal(Crystal *crystal){
 	
 	// Changing the lattice type resets fields; restore the exact values afterwards.
 	const QSignalBlocker latticeABlocker(ui.LatticeA);
+	const QSignalBlocker latticeAlphaBlocker(ui.LatticeAlpha);
 	ui.LatticeA->setText(QString::number(crystal->getLatticeA(), 'g', 15));
 	ui.LatticeB->setText(QString::number(crystal->getLatticeB(), 'g', 15));
 	ui.LatticeC->setText(QString::number(crystal->getLatticeC(), 'g', 15));
@@ -153,7 +177,10 @@ void CrystalDialog::setCrystal(Crystal *crystal){
 }
 
 void CrystalDialog::getCrystal(Crystal *crystal){
-	// Save the crystal parameters
+	// Validate before touching the caller's crystal, then publish atomically.
+    if(!validationError().isEmpty()) return;
+    Crystal candidate = *crystal;
+    // Save the crystal parameters
 	
 	double a,b,c,alpha,beta,gamma;
 	
@@ -165,11 +192,11 @@ void CrystalDialog::getCrystal(Crystal *crystal){
 	beta = M_PI * ui.LatticeBeta->text().toDouble() / 180.0;
 	gamma = M_PI * ui.LatticeGamma->text().toDouble() / 180.0;
 
-	crystal->setLattice(a,b,c,alpha,beta,gamma);
+	candidate.setLattice(a,b,c,alpha,beta,gamma);
 	
 	// Now set the atoms ... cycle trough the table
 	
-	crystal->delAllAtoms();
+	candidate.delAllAtoms();
 	
 	for(int i=0; i<ui.AtomsTable->rowCount(); ++i){
 		QComboBox *box = (QComboBox*)ui.AtomsTable->cellWidget(i,0);
@@ -177,17 +204,18 @@ void CrystalDialog::getCrystal(Crystal *crystal){
 			a = ui.AtomsTable->item(i,1)->text().toDouble();
 			b = ui.AtomsTable->item(i,2)->text().toDouble();
 			c = ui.AtomsTable->item(i,3)->text().toDouble();
-			crystal->addAtom(box->currentIndex(),a,b,c);
+			if(!candidate.addAtom(box->currentIndex(),a,b,c)) return;
 		}
 	}
 	
 	// Set the spacegroup
 	// qDebug("CrystalDialog::getCrystal() : SpacegroupBox Index = %d",ui.SpacegroupBox->currentIndex());
 	
-	crystal->setSpaceGroup(SpacegroupBoxIndex[ui.SpacegroupBox->currentIndex()]);
-	crystal->spaceGroupGenerate();
+	candidate.setSpaceGroup(SpacegroupBoxIndex[ui.SpacegroupBox->currentIndex()]);
+	if(!candidate.spaceGroupGenerate()) return;
 	
-	crystal->setName(ui.DescriptionTextEdit->toPlainText().toUtf8().constData());
+	candidate.setName(ui.DescriptionTextEdit->toPlainText().toUtf8().constData());
+    *crystal = candidate;
 }
 
 QString CrystalDialog::validationError() const {
@@ -203,7 +231,12 @@ QString CrystalDialog::validationError() const {
 	if(!Crystal::isValidLattice(cell[0],cell[1],cell[2],cell[3],cell[4],cell[5]))
 		return tr("The unit cell has invalid lengths, angles or volume.");
 	if(ui.SpacegroupBox->currentIndex() < 0) return tr("Select a space group.");
+	const spacegroup &group = spacegroups[SpacegroupBoxIndex[ui.SpacegroupBox->currentIndex()]];
+	if(!matchesCell(group, cell)) {
+		return tr("The unit-cell lengths and angles do not match the selected space-group setting.");
+	}
 	Crystal candidate;
+    candidate.setLattice(cell[0],cell[1],cell[2],cell[3],cell[4],cell[5]);
 	candidate.setSpaceGroup(SpacegroupBoxIndex[ui.SpacegroupBox->currentIndex()]);
 	int atoms = 0;
 	for(int row=0; row<ui.AtomsTable->rowCount(); ++row){
@@ -212,14 +245,20 @@ QString CrystalDialog::validationError() const {
 		if(++atoms > candidate.maxRootAtoms())
 			return tr("Too many atom sites for this space group (maximum %1 sites).")
 				.arg(candidate.maxRootAtoms());
-		for(int column=1; column<4; ++column){
-			bool ok = false;
-			double position = ui.AtomsTable->item(row,column)->text().toDouble(&ok);
-			if(!ok || !std::isfinite(position))
-				return tr("Enter valid fractional coordinates for atom %1.").arg(row+1);
-		}
-	}
-	return QString();
+        double position[3];
+        for(int column=1; column<4; ++column){
+            bool ok = false;
+            const auto item = ui.AtomsTable->item(row,column);
+            position[column-1] = item ? item->text().toDouble(&ok) : 0;
+            if(!ok || !std::isfinite(position[column-1]))
+                return tr("Enter valid fractional coordinates for atom %1.").arg(row+1);
+        }
+        if(!candidate.addAtom(box->currentIndex(),position[0],position[1],position[2]))
+            return tr("Atom %1 cannot be represented in this structure.").arg(row+1);
+    }
+    if(!candidate.spaceGroupGenerate())
+        return tr("The symmetry-expanded structure exceeds QLaue's atom limit.");
+    return QString();
 }
 
 void CrystalDialog::accept() {
@@ -247,113 +286,60 @@ void CrystalDialog::importCif() {
 }
 
 void CrystalDialog::latticeTypeChanged(bool state){
-	if(state){
-		if(ui.OrthorhombicButton->isChecked()){
-			lattice_type = Crystal::Orthorhombic;
-			ui.LatticeAlpha->setText("90");
-			ui.LatticeBeta->setText("90");
-			ui.LatticeGamma->setText("90");
-			ui.LatticeAlpha->setEnabled(false);
-			ui.LatticeBeta->setEnabled(false);
-			ui.LatticeGamma->setEnabled(false);
-			ui.LatticeB->setEnabled(true);
-			ui.LatticeA->setEnabled(true);
-			ui.LatticeC->setEnabled(true);
-			setSpacegroupBox(Crystal::Orthorhombic);
-			return;
-		}
-		if(ui.TetragonalButton->isChecked()){
-			lattice_type = Crystal::Tetragonal;
-			ui.LatticeAlpha->setText("90");
-			ui.LatticeBeta->setText("90");
-			ui.LatticeGamma->setText("90");
-			ui.LatticeAlpha->setEnabled(false);
-			ui.LatticeBeta->setEnabled(false);
-			ui.LatticeGamma->setEnabled(false);
-			ui.LatticeB->setEnabled(false);
-			ui.LatticeA->setEnabled(true);
-			ui.LatticeC->setEnabled(true);
-			setSpacegroupBox(Crystal::Tetragonal);
-			return;
-		}
-		if(ui.CubicButton->isChecked()){
-			lattice_type = Crystal::Cubic;
-			ui.LatticeAlpha->setText("90");
-			ui.LatticeBeta->setText("90");
-			ui.LatticeGamma->setText("90");
-			ui.LatticeAlpha->setEnabled(false);
-			ui.LatticeBeta->setEnabled(false);
-			ui.LatticeGamma->setEnabled(false);
-			ui.LatticeA->setEnabled(true);
-			ui.LatticeB->setEnabled(false);
-			ui.LatticeC->setEnabled(false);
-			setSpacegroupBox(Crystal::Cubic);
-			return;
-		}
-		if(ui.MonoclinicButton->isChecked()){
-			lattice_type = Crystal::Monoclinic;
-			ui.LatticeAlpha->setEnabled(false);
-			ui.LatticeBeta->setEnabled(true);
-			ui.LatticeGamma->setEnabled(false);
-			ui.LatticeAlpha->setText("90");
-			ui.LatticeGamma->setText("90");
-			ui.LatticeA->setEnabled(true);
-			ui.LatticeB->setEnabled(true);
-			ui.LatticeC->setEnabled(true);
-			setSpacegroupBox(Crystal::Monoclinic);
-			return;
-		}
-		if(ui.HexagonalButton->isChecked()){
-			lattice_type = Crystal::Hexagonal;
-			ui.LatticeAlpha->setText("90");
-			ui.LatticeBeta->setText("90");
-			ui.LatticeGamma->setText("120");
-			ui.LatticeAlpha->setEnabled(false);
-			ui.LatticeBeta->setEnabled(false);
-			ui.LatticeGamma->setEnabled(false);
-			ui.LatticeA->setEnabled(true);
-			ui.LatticeB->setEnabled(false);
-			ui.LatticeC->setEnabled(true);
-			setSpacegroupBox(Crystal::Hexagonal);
-			return;
-		}
-		if(ui.TriclinicButton->isChecked()){
-			lattice_type = Crystal::Triclinic;
-			ui.LatticeAlpha->setEnabled(true);
-			ui.LatticeBeta->setEnabled(true);
-			ui.LatticeGamma->setEnabled(true);
-			ui.LatticeA->setEnabled(true);
-			ui.LatticeB->setEnabled(true);
-			ui.LatticeC->setEnabled(true);
-			setSpacegroupBox(Crystal::Triclinic);
-			return;
-		}
-		if(ui.TrigonalButton->isChecked()){
-			lattice_type = Crystal::Triclinic;
-			ui.LatticeAlpha->setEnabled(true);
-			ui.LatticeBeta->setEnabled(false);
-			ui.LatticeGamma->setEnabled(false);
-			ui.LatticeA->setEnabled(true);
-			ui.LatticeB->setEnabled(false);
-			ui.LatticeC->setEnabled(false);
-			setSpacegroupBox(Crystal::Trigonal);
-			return;
-		}
-		if(ui.AllSpaceGroupsButton->isChecked()){
-			lattice_type = Crystal::Triclinic;
-			ui.LatticeAlpha->setEnabled(true);
-			ui.LatticeBeta->setEnabled(true);
-			ui.LatticeGamma->setEnabled(true);
-			ui.LatticeA->setEnabled(true);
-			ui.LatticeB->setEnabled(true);
-			ui.LatticeC->setEnabled(true);
-			setSpacegroupBox(-1);
-			return;
-		}
-	}
+    if(!state) return;
+    if(ui.OrthorhombicButton->isChecked()) setSpacegroupBox(Crystal::Orthorhombic);
+    else if(ui.TetragonalButton->isChecked()) setSpacegroupBox(Crystal::Tetragonal);
+    else if(ui.CubicButton->isChecked()) setSpacegroupBox(Crystal::Cubic);
+    else if(ui.MonoclinicButton->isChecked()) setSpacegroupBox(Crystal::Monoclinic);
+    else if(ui.HexagonalButton->isChecked()) setSpacegroupBox(Crystal::Hexagonal);
+    else if(ui.TriclinicButton->isChecked()) setSpacegroupBox(Crystal::Triclinic);
+    else if(ui.TrigonalButton->isChecked()) setSpacegroupBox(Crystal::Trigonal);
+    else setSpacegroupBox(-1);
+}
+
+void CrystalDialog::syncLatticeConstraints(){
+    QLineEdit *fields[] = {ui.LatticeA, ui.LatticeB, ui.LatticeC,
+                          ui.LatticeAlpha, ui.LatticeBeta, ui.LatticeGamma};
+    for(QLineEdit *field : fields) field->setEnabled(true);
+    // The unfiltered editor preserves the user's cell, including imported
+    // nonstandard settings. Validation checks it without silently correcting it.
+    if(ui.AllSpaceGroupsButton->isChecked() || ui.SpacegroupBox->currentIndex() < 0) return;
+
+    const spacegroup &group = spacegroups[SpacegroupBoxIndex[ui.SpacegroupBox->currentIndex()]];
+    const int type = group.XtalSystem;
+    const bool rhombohedral = type == Crystal::Trigonal && !strcmp(group.Extn, "R");
+    const bool hexagonal = type == Crystal::Hexagonal || (type == Crystal::Trigonal && !rhombohedral);
+    const bool equalAB = type == Crystal::Cubic || type == Crystal::Tetragonal || hexagonal || rhombohedral;
+    if(equalAB) {
+        ui.LatticeB->setText(ui.LatticeA->text());
+        ui.LatticeB->setEnabled(false);
+    }
+    if(type == Crystal::Cubic || rhombohedral) {
+        ui.LatticeC->setText(ui.LatticeA->text());
+        ui.LatticeC->setEnabled(false);
+    }
+
+    // Updating a fixed alpha must not reenter while the other angles are set.
+    const QSignalBlocker alphaBlocker(ui.LatticeAlpha);
+    if(rhombohedral) {
+        ui.LatticeBeta->setText(ui.LatticeAlpha->text());
+        ui.LatticeGamma->setText(ui.LatticeAlpha->text());
+        ui.LatticeBeta->setEnabled(false);
+        ui.LatticeGamma->setEnabled(false);
+    } else if(type != Crystal::Triclinic) {
+        const QString setting = QString::fromLatin1(group.Extn);
+        for(int angle=0; angle<3; ++angle) {
+            const bool freeAngle = type == Crystal::Monoclinic && setting.contains(QChar('a' + angle));
+            if(!freeAngle) fields[angle+3]->setText(hexagonal && angle == 2 ? "120" : "90");
+            fields[angle+3]->setEnabled(freeAngle);
+        }
+    }
 }
 
 void CrystalDialog::setSpacegroupBox(int crystaltype){
+    const int previous = ui.SpacegroupBox->currentIndex() < 0 ? -1
+        : SpacegroupBoxIndex[ui.SpacegroupBox->currentIndex()];
+    int selected = 0;
 	QStringList sgroups;
 	int sgnum = 0;
 	int index = 0;
@@ -361,6 +347,7 @@ void CrystalDialog::setSpacegroupBox(int crystaltype){
 	while(spacegroups[sgnum].number != 0){
 		if((spacegroups[sgnum].XtalSystem == crystaltype) ||
 		   (crystaltype == -1)){
+			if(sgnum == previous) selected = index;
 			SpacegroupBoxIndex[index++] = sgnum;
 			
 			if(strcmp(spacegroups[sgnum].Extn,"")){
@@ -377,23 +364,11 @@ void CrystalDialog::setSpacegroupBox(int crystaltype){
 		sgnum++;
 	}
 	
-	ui.SpacegroupBox->clear();
-	ui.SpacegroupBox->insertItems(0,sgroups);	
-	ui.SpacegroupBox->setCurrentIndex(0);
-}
-
-void CrystalDialog::latticeAChanged(const QString newval){
-	if(ui.TetragonalButton->isChecked()){
-		ui.LatticeB->setText(newval);
-		return;
-	}
-	if(ui.CubicButton->isChecked()){
-		ui.LatticeB->setText(newval);
-		ui.LatticeC->setText(newval);
-		return;
-	}
-	if(ui.HexagonalButton->isChecked()){
-		ui.LatticeB->setText(newval);
-		return;
-	}
+    {
+        const QSignalBlocker groupBlocker(ui.SpacegroupBox);
+        ui.SpacegroupBox->clear();
+        ui.SpacegroupBox->insertItems(0,sgroups);
+        ui.SpacegroupBox->setCurrentIndex(selected);
+    }
+    syncLatticeConstraints();
 }

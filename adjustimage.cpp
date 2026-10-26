@@ -54,10 +54,8 @@ int changeMax( int value, int max) {
 }
 
 int changeMin( int value, int min) {
-	if(min == 255){
-		min = 254;
-	}
-	return kClamp( (value - min) / (1 - (min / 255)), 0, 255);
+	min = kClamp(min, 0, 254);
+	return kClamp((value - min) * 255 / (255 - min), 0, 255);
 }
 
 inline int changeUsingTable( int value, const int table[] ) {
@@ -148,9 +146,11 @@ QImage changeImageGamma( const QImage& image, int gamma ) {
 }
 
 QImage changeImageMin( const QImage& image, int min) {
+	if(min == 0) return image;
 	return changeImage< changeMin >(image, min);
 }
 
 QImage changeImageMax( const QImage& image, int max) {
+	if(max == 255) return image;
 	return changeImage< changeMax >(image, max);
 }

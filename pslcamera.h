@@ -30,7 +30,10 @@
 #include <QThread>
 #include <QImage>
 #include <QMutex>
-#include <QWaitCondition>
+#include <QElapsedTimer>
+#include <QPointer>
+class QTcpSocket;
+class PSLCameraThread;
 #include "ui_pslcamera.h"
 #include "ui_pslcamera2.h"
 #include "ui_pslcamera3.h"
@@ -41,8 +44,15 @@ class PSLCameraWidget : public QWidget
 	
 public:
 	PSLCameraWidget(QWidget *parent = 0);
+	void setCamera(PSLCameraThread *camera);
+public slots:
+	void acquireImage();
 private:
 	Ui::PSLCameraWidget ui;
+	QPointer<PSLCameraThread> camera;
+	bool applySettings();
+	void syncSettings();
+	void setBusy(bool busy);
 };
 
 
@@ -60,8 +70,10 @@ public:
 	
 	void setHostname(QString hostname)		{ ui.hostname->setText(hostname); }
 	void setPort(quint16 port)				{ ui.portSpinBox->setValue((int)port); }
-	void setIntegrationTime(double time)	{ ui.integrationTime->setText(QString("%1").arg(time)); }
-	void setBinning(int bin)				{ ui.binningSpinBox->setValue(bin); }
+	void setIntegrationTime(double time)	{ ui.integrationTime->setText(QString::number(time,'g',17)); }
+	void setBinning(int bin)				{ ui.binningSpinBox->setMaximum(qMax(4,bin)); ui.binningSpinBox->setValue(bin); }
+public slots:
+	void accept() override;
 };
 
 class PSLCameraImageDialog : public QDialog {
@@ -82,37 +94,48 @@ public:
 	~PSLCameraThread();
 	void getImage(void);
 	void run();
-	QImage getNewImage() {return receivedImage;}
+	QImage getNewImage();
 	
 	void setHost(QString host, qint16 portnum);
 	void setIntegrationTime(double time);
 	void setBinning(int binning);
+	void setTimeout(int milliseconds);
 	
-	QString getHostname(void)				{ return hostName; }
-	quint16 getPort(void)					{ return port; }
-	double getIntegrationTime(void)			{ return integrationTime; }
-	int getBinning(void)					{ return binning; }
+	QString getHostname(void);
+	quint16 getPort(void);
+	double getIntegrationTime(void);
+	int getBinning(void);
 	
 signals:
 	void error(int socketError, const QString &message);
 	void newImage(void);
 	void statusChange(QString message);
+	void settingsChanged();
 	
 private:
-	void sendSnap(void);
-	bool sendGetImage(void);
-	void sendCommand(QString command);
-	
-	QString hostName;
-	quint16 port;
-	int timeout;
-	double integrationTime;
-	int binning;
-	
-	QMutex mutex;
-	QWaitCondition cond;
-	QImage receivedImage;
-	bool quit;
+    struct Request {
+        QString host;
+        quint16 port;
+        int timeout;
+        double integrationTime;
+        int binning;
+    };
+    bool fail(const QString &message, int code = -1);
+    bool connectSocket(QTcpSocket &socket, const Request &request);
+    bool readBytes(QTcpSocket &socket, QByteArray &bytes, int count,
+                   QElapsedTimer &timer, qint64 deadline, double exposure = 0);
+    bool sendCommand(const Request &request, const QString &command, bool snap = false);
+    bool sendGetImage(const Request &request);
+
+    QString hostName;
+    quint16 port;
+    int timeout;
+    double integrationTime;
+    int binning;
+    QMutex mutex;
+    Request pending;
+    QImage receivedImage;
+
 };
 
 #endif

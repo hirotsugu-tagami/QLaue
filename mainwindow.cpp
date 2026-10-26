@@ -100,12 +100,17 @@ MainWindow::MainWindow() : QMainWindow() {
 	setupActions();					// Setup Menubar
 	updateRecentFileActions();		// Setup recent crystals
 	
+	savedDocumentState = documentState();
 	newCrystal();					// Initializes the crystal
 	
 	recalculated();
 	readSettings();
 	
 	setCurrentFile(QString(""));
+}
+
+MainWindow::~MainWindow() {
+	delete printer;
 }
 
 void MainWindow::displayHelpError(QString message) {
@@ -176,18 +181,21 @@ void MainWindow::createDockWindows(void){
 	
 	indexingDock = new QDockWidget(tr("Indexing Display"), this);
 	indexingDock->setObjectName("Indexing");
-	indexingDock->setAllowedAreas(Qt::RightDockWidgetArea | Qt::LeftDockWidgetArea);
+	indexingDock->setAllowedAreas(Qt::AllDockWidgetAreas);
 	indexingWidget = new QTableWidget(this);
 	indexingWidget->show();
 	indexingDock->setFeatures(QDockWidget::AllDockWidgetFeatures);
 	indexingDock->setWidget(indexingWidget);
-	addDockWidget(Qt::RightDockWidgetArea,indexingDock);
+	addDockWidget(Qt::BottomDockWidgetArea,indexingDock);
+	setCorner(Qt::BottomLeftCorner,Qt::BottomDockWidgetArea);
+	setCorner(Qt::BottomRightCorner,Qt::BottomDockWidgetArea);
 	indexingDock->hide();
 	
 	lauecontrols->setAll(film);
 }
 
 void MainWindow::createConnections(void){
+	cameraWidget->setCamera(camera);
 	
 	// Connections for the rotate dialog
 	
@@ -199,9 +207,7 @@ void MainWindow::createConnections(void){
 	
 	// Connections for the indexing routines
 	
-	connect(film->getIndexing(), SIGNAL(newIndexingAvaliable(int, LaueOrientations *)), this, SLOT(displayIndexingResults(int, LaueOrientations *)));
-	connect(film->getIndexing(), SIGNAL(calcStarted()), this, SLOT(clearIndexingResults()));
-	connect(indexingWidget, SIGNAL(cellClicked(int, int)), this, SLOT(displaySingleIndexingResult(int, int)));
+	connect(film,&LaueFilm::newIndexingAvailable,this,&MainWindow::displayIndexingResults);
 	connect(indexingWidget, SIGNAL(itemSelectionChanged()), this, SLOT(displaySingleIndexingResult()));
 	
 	// Conections for the LaueControls class
@@ -234,24 +240,32 @@ void MainWindow::createConnections(void){
 }
 
 void MainWindow::newCrystal(void){
+	if(!maybeSave())
+		return;
 	setupCrystal();
-	
-	film->reCalc();
-	
-	// Remove the laue film
-	QImage blank;
-	*film->importedImage = blank;
-	*film->importedScaledImage = blank;
-	setDisplayImageControls(false);
-	film->setDisplayImage(false);
-	
-	// Remove the indexing spots!
-	
+	clearImage();
 	film->clearOrientation();
-	
+	setCurrentFile(QString());
+	reCalcAll();
+	savedDocumentState = documentState();
+}
+
+void MainWindow::clearImage(){
+	QImage blank;
+	film->setImage(blank, false);
+	film->resetView();
+	ui.actionInvert_Image->setChecked(false);
+	ui.actionRotate_Image->setChecked(false);
+	ui.actionShow_Image->setChecked(false);
+	film->setDisplayImage(false);
+	QSignalBlocker blocked(imagecontrols);
+	imagecontrols->setDefaults();
+	imagecontrols->setImageInfo(QString());
+	setDisplayImageControls(false);
 }
 
 void MainWindow::setupCrystal(void){
+    crystal->setName("");
 	crystal->setLattice(5.4,5.4,5.4,M_PI/2,M_PI/2,M_PI/2);
 	crystal->setSpaceGroup(0); // P_1
 	crystal->setU(1,0,0,0,0,1);
@@ -263,14 +277,29 @@ void MainWindow::setupCrystal(void){
 void MainWindow::closeEvent(QCloseEvent *event){
 	if (maybeSave()) {
 		writeSettings();
-		qApp->quit();
+		event->accept();
 	} else {
 		event->ignore();
 	}
 }
 
 bool MainWindow::maybeSave(void){
-	return true;
+	if(documentState() == savedDocumentState)
+		return true;
+	const QMessageBox::StandardButton choice = QMessageBox::warning(this, tr(APP_NAME),
+		tr("This analysis has unsaved changes. Do you want to save them?"),
+		QMessageBox::Save | QMessageBox::Discard | QMessageBox::Cancel,
+		QMessageBox::Save);
+	if(choice == QMessageBox::Save)
+		return saveCrystal();
+	return choice == QMessageBox::Discard;
+}
+
+QByteArray MainWindow::documentState() const {
+	DataFile datafile;
+	datafile.setCrystal(crystal);
+	datafile.setLaue(film);
+	return datafile.documentState();
 }
 
 void MainWindow::readSettings(void){
@@ -388,6 +417,7 @@ void MainWindow::setupActions(void){
 	connect(ui.actionSolve_Orientation, SIGNAL(triggered()), film, SLOT(solveOrientation()));
 	connect(ui.actionResolve_Orientation, SIGNAL(triggered()), film, SLOT(resolveOrientation()));
 	connect(ui.actionSet_Laue_Orientation, SIGNAL(triggered()), film, SLOT(setOrientation()));
+	connect(ui.actionReset_Orientation, &QAction::triggered, this, &MainWindow::resetCrystalOrientation);
 	connect(ui.actionRotate_about_axis, SIGNAL(triggered()), film, SLOT(rotateAboutAxis()));
 	
 	// Window menu
@@ -398,6 +428,19 @@ void MainWindow::setupActions(void){
 	connect(ui.actionIndexing_Viewer, SIGNAL(toggled(bool)), indexingDock, SLOT(setVisible(bool)));
 	connect(ui.actionRotations_Toolbox, SIGNAL(toggled(bool)), rotateWidgetDock, SLOT(setVisible(bool)));
 	connect(ui.actionImage_Controls, SIGNAL(toggled(bool)), imageControlsDock, SLOT(setVisible(bool)));
+	const QPair<QAction *, QDockWidget *> tools[] = {
+		{ui.actionText_Viewer, textViewDock},
+		{ui.actionCrystal_Orientation_View, crystalDock},
+		{ui.actionIndexing_Viewer, indexingDock},
+		{ui.actionRotations_Toolbox, rotateWidgetDock},
+		{ui.actionImage_Controls, imageControlsDock}
+	};
+	for(const auto &tool : tools) {
+		connect(tool.second, &QDockWidget::visibilityChanged, this, [this, tool](bool) {
+			const QSignalBlocker blocked(tool.first);
+			tool.first->setChecked(tool.second->isVisibleTo(this));
+		});
+	}
 	
 	// Help Menu
 	
@@ -467,6 +510,7 @@ void MainWindow::createToolBars(void){
 void MainWindow::updateRecentFileActions() {
 	QSettings settings;
 	QStringList files = settings.value("recentFileList").toStringList();
+	files.removeAll(QString());
 	
 	int numRecentFiles = qMin(files.size(), (int)MaxRecentFiles);
 	
@@ -510,9 +554,12 @@ void MainWindow::setCurrentFile(const QString &fileName)
 	else
 		setWindowTitle(tr("%2 - [*]%1").arg(strippedName(currentCrystalFilename))
 					   .arg(tr(APP_NAME)));
+	if(fileName.isEmpty())
+		return;
 	
 	QSettings settings;
 	QStringList files = settings.value("recentFileList").toStringList();
+	files.removeAll(QString());
 	files.removeAll(fileName);
 	files.prepend(fileName);
 	while (files.size() > MaxRecentFiles)
@@ -532,6 +579,7 @@ void MainWindow::displayCrystalDialog(void){
 	dialog.setCrystal(crystal);
 	if(dialog.exec() == QDialog::Accepted){
 		dialog.getCrystal(crystal);
+		film->clearOrientation();
 		reCalcAll();
 	}
 }
@@ -542,7 +590,12 @@ void MainWindow::displayPreferencesDialog(void){
 	dialog.setLaue(film->getLaue());
 	
 	if(dialog.exec() == QDialog::Accepted){
+		const double previousMinimum = film->getLaue()->getLambdaRangeMin();
+		const double previousMaximum = film->getLaue()->getLambdaRangeMax();
 		dialog.getLaue(film->getLaue());
+		if(previousMinimum != film->getLaue()->getLambdaRangeMin() ||
+		   previousMaximum != film->getLaue()->getLambdaRangeMax())
+			film->clearOrientationResults();
 		reCalcAll();
 	}
 
@@ -556,6 +609,13 @@ void MainWindow::displayUMatrixDialog(void){
 	}
 }
 
+void MainWindow::resetCrystalOrientation(void) {
+	// Match the initial hkl alignment for this lattice; setU also zeros goniometer angles.
+	if(!crystal->setU(1,0,0,0,0,1)) return;
+	film->clearOrientation();
+	reCalcAll();
+}
+
 void MainWindow::openRecent(void){
 	QAction *action = qobject_cast<QAction *>(sender());
 	if (action){
@@ -564,7 +624,8 @@ void MainWindow::openRecent(void){
 }
 
 void MainWindow::loadCrystal(QString filename){	
-	
+	if(filename.isEmpty() || !maybeSave())
+		return;
 	DataFile datafile;
 	if(!datafile.read(filename)){
 		// We have an error ... read the errors from 
@@ -579,16 +640,22 @@ void MainWindow::loadCrystal(QString filename){
 	}
 
 	*crystal = datafile.getCrystal();
+	film->clearOrientation();
 	datafile.getLaue(film);
-	reCalcAll();
-	
+	clearImage();
 	QImage image = datafile.getLaueImage();
 	if(!image.isNull()){
 		film->setImage(image, true);
 		film->setOriginX(datafile.originX());
 		film->setOriginY(datafile.originY());
 		film->setScale(datafile.imageScale());
-		film->setDisplayImage(true);
+		datafile.applyImageSettings(film);
+		ui.actionInvert_Image->setChecked(film->isImageInverted());
+		ui.actionRotate_Image->setChecked(film->isImageRotated());
+		ui.actionShow_Image->setChecked(film->isImageDisplayed());
+		imagecontrols->setValues(film->imageBrightness(),film->imageContrast(),
+			film->imageMaximum(),film->imageMinimum());
+		imagecontrols->setImageInfo(tr("%1 x %2 pixels").arg(image.width()).arg(image.height()));
 		setDisplayImageControls(true);
 	}
 	
@@ -596,53 +663,35 @@ void MainWindow::loadCrystal(QString filename){
 							 .arg(strippedName(filename)), 5000);
 	setCurrentFile(filename);
 	lauecontrols->setAll(film);
+	reCalcAll();
+	savedDocumentState = documentState();
 }
 
-void MainWindow::importCif(void){	
-	
-	if(!maybeSave())
-		return;
-	QString filename = QFileDialog::getOpenFileName(this,
-											 "Choose a file to import",
-											 "",
-											 "CIF Files (*.cif)");
-	if(filename == NULL)
-		return;
-	
-	DataFile datafile;
-	
-	if(!datafile.readCif(filename)){
-		QMessageBox::information(window(), tr(APP_NAME),
-								 tr("Parse error"));
-		return;
-	}
-	
-	*crystal = datafile.getCrystal();
-	
-	statusBar()->showMessage(QString("Imported %1")
-							 .arg(strippedName(filename)),5000);
+void MainWindow::importCif(void){
+	importCrystal(true);
 }
 
-void MainWindow::importCel(void){	
-	
-	if(!maybeSave())
+void MainWindow::importCel(void){
+	importCrystal(false);
+}
+
+void MainWindow::importCrystal(bool cif){
+	const QString filename = QFileDialog::getOpenFileName(this,
+		tr("Choose a file to import"), currentWorkingDir,
+		cif ? tr("CIF Files (*.cif)") : tr("CEL Files (*.cel)"));
+	if(filename.isEmpty() || !maybeSave())
 		return;
-	QString filename = QFileDialog::getOpenFileName(this,
-													"Choose a file to import",
-													"",
-													"CEL Files (*.cel)");
-	if(filename == NULL)
-		return;
-	
 	DataFile datafile;
-	
-	if(!datafile.readCel(filename)){
+	if(!(cif ? datafile.readCif(filename) : datafile.readCel(filename))){
 		QMessageBox::information(window(), tr(APP_NAME),
-								 tr("Parse error"));
+			tr("Could not import \"%1\":\n%2")
+			.arg(QFileInfo(filename).fileName(), datafile.getErrorStr()));
 		return;
 	}
-	
 	*crystal = datafile.getCrystal();
+	film->clearOrientation();
+	setCurrentFile(QString());
+	savedDocumentState.clear(); // An imported structure has not been saved as an analysis.
 	reCalcAll();
 	statusBar()->showMessage(QString("Imported %1")
 							 .arg(strippedName(filename)),5000);
@@ -650,49 +699,46 @@ void MainWindow::importCel(void){
 
 void MainWindow::open(void){
 	
-	if(!maybeSave())
-		return;
-	
 	QString s = QFileDialog::getOpenFileName(this,
-											 tr("Choose a file to laod"),
+											 tr("Choose a file to load"),
 											 currentWorkingDir,
 											 tr("Crystals (*.xtl)"));
 	if(s == NULL)
 		return;
 	
 	loadCrystal(s);
-	setCurrentFile(s);
 }
 
-void MainWindow::saveAsCrystal(void){
+bool MainWindow::saveAsCrystal(void){
 	QString fileName = QFileDialog::getSaveFileName(this,
 											 tr("Choose a file to save under"),
 											 currentWorkingDir,
 											 tr("Crystals (*.xtl)"));
-	if(!fileName.isEmpty()) {
-		if(fileName.right(4) != ".xtl") 
-			fileName = fileName + ".xtl";
-		setCurrentFile(fileName);
-		saveCrystal();
-	}
+	if(fileName.isEmpty())
+		return false;
+	if(!fileName.endsWith(".xtl", Qt::CaseInsensitive))
+		fileName += ".xtl";
+	return saveCrystalTo(fileName);
 }
 
-void MainWindow::saveCrystal(void){
-	if(currentCrystalFilename.isEmpty()){
-		saveAsCrystal();
-		return;
-	}
-	
+bool MainWindow::saveCrystal(void){
+	return currentCrystalFilename.isEmpty() ? saveAsCrystal() : saveCrystalTo(currentCrystalFilename);
+}
+
+bool MainWindow::saveCrystalTo(const QString &filename){
 	DataFile datafile;
 	datafile.setCrystal(crystal);
 	datafile.setLaue(film);
-	if(!datafile.write(currentCrystalFilename)){
-		currentCrystalFilename = "";
+	if(!datafile.write(filename)){
+		QMessageBox::warning(this, tr(APP_NAME),
+			tr("Could not save \"%1\":\n%2").arg(QFileInfo(filename).fileName(), datafile.getErrorStr()));
+		return false;
 	}
-	
+	setCurrentFile(filename);
+	savedDocumentState = datafile.documentState();
 	statusBar()->showMessage(QString("Saved %1.")
 							 .arg(strippedName(currentCrystalFilename)),5000);
-	return;
+	return true;
 }
 
 void MainWindow::aquireImageDialog(void){
@@ -710,7 +756,7 @@ void MainWindow::aquireImageDialog(void){
 }
 
 void MainWindow::aquireImage(void){
-	camera->getImage();	
+	cameraWidget->acquireImage();
 }
 			
 void MainWindow::aquireImageMessageDisplay(QString message){
@@ -779,12 +825,16 @@ void MainWindow::printAction(void){
 	print(LaueFilm::NoPrintReorientation);
 }
 
-void MainWindow::print(int printmode){
-	if(!printer)
-		printer = new QPrinter(QPrinter::HighResolution);
-	
+void MainWindow::preparePrinter(QPrinter::Orientation orientation) {
+	if(printer) return;
+	printer = new QPrinter(QPrinter::HighResolution);
 	printer->setResolution(300);
-	printer->setOrientation(QPrinter::Landscape);
+	printer->setOrientation(orientation);
+}
+
+void MainWindow::print(int printmode){
+	preparePrinter(QPrinter::Landscape);
+	const QPageLayout originalLayout = printer->pageLayout();
 	QPrintDialog printDialog(printer, this);
     if (printDialog.exec() == QDialog::Accepted) {
 		QString printer_name = printer->printerName();
@@ -794,20 +844,16 @@ void MainWindow::print(int printmode){
 			QMessageBox::critical(this, tr(APP_NAME), tr("Printer Error"));
 			return;
 		}
-		printer->setOrientation(QPrinter::Landscape);
 		film->print(printer, &painter, printmode);
 		painter.end();
+    } else {
+		printer->setPageLayout(originalLayout);
     }
-	
-	delete printer; printer = NULL;
 }
 
 void MainWindow::printHtmlPage(QString html){
-	if(!printer)
-		printer = new QPrinter(QPrinter::ScreenResolution);
-	
-	//printer->setResolution(300);
-	printer->setOrientation(QPrinter::Portrait);
+	preparePrinter(QPrinter::Portrait);
+	const QPageLayout originalLayout = printer->pageLayout();
 	QPrintDialog printDialog(printer, this);
     if (printDialog.exec() == QDialog::Accepted) {
 		QTextDocument textbox;
@@ -815,18 +861,17 @@ void MainWindow::printHtmlPage(QString html){
 		textbox.setDefaultFont(serifFont);
 		textbox.setHtml(html);
 		textbox.print(printer);
+	} else {
+		printer->setPageLayout(originalLayout);
 	}
-	
-	delete printer; printer = NULL;
 }
 
 void MainWindow::pageSetupAction(void){
-	if(!printer){
-		printer = new QPrinter(QPrinter::HighResolution);
-		printer->setOrientation(QPrinter::Landscape);
-	}
+	preparePrinter(QPrinter::Landscape);
+	const QPageLayout originalLayout = printer->pageLayout();
 	QPageSetupDialog pageSetupDialog(printer, this);
-	pageSetupDialog.exec();
+	if(pageSetupDialog.exec() != QDialog::Accepted)
+		printer->setPageLayout(originalLayout);
 }
 
 void MainWindow::about(void){
@@ -864,6 +909,8 @@ QString MainWindow::strippedName(const QString &fullFileName) {
 }
 
 void MainWindow::setDisplayImageControls(bool yesno){
+	const QSignalBlocker imageAction(ui.actionShow_Image);
+	ui.actionShow_Image->setChecked(film->isImageDisplayed());
 	ui.actionInvert_Image->setEnabled(yesno);
 	ui.actionShow_Image->setEnabled(yesno);
 	//ui.actionLaueZoom->setEnabled(yesno);
@@ -946,23 +993,27 @@ void MainWindow::reCalcAll(void){
 
 void MainWindow::displaySingleIndexingResult(int row, int col){
 	Q_UNUSED(col);
-	film->setU(film->getIndexing()->getOrientations(row).getU());
+	const auto &results = film->getOrientations();
+	if(row >= 0 && row < results.size()) film->setU(results[row].getU());
 }
 
 void MainWindow::displaySingleIndexingResult(void){
-	int row = indexingWidget->currentRow();
-	film->setU(film->getIndexing()->getOrientations(row).getU());
+	if(indexingWidget->selectedItems().isEmpty()) return;
+	displaySingleIndexingResult(indexingWidget->currentRow(),0);
 }
 
-void MainWindow::displayIndexingResults(int nOrientations, LaueOrientations *orientations){
+void MainWindow::displayIndexingResults(){
+	QSignalBlocker blocked(indexingWidget);
+	const auto &orientations = film->getOrientations();
+	const int nOrientations = orientations.size();
 	
-	indexingDock->setVisible(true);
+	indexingDock->setVisible(nOrientations > 0);
 	
 	// Start some variables
 	
 	QStringList headerLabels;
 	
-	headerLabels << "Primary Rfln." << "Secondary Rfln." << "Hits" << "Pattern Diff.";
+	headerLabels << "Primary Rfln." << "Secondary Rfln." << "Hits" << "RMS (mm)";
 	
 	// Ok so we need to populate the table with the
 	// clacc LaueOrientations
@@ -1009,10 +1060,12 @@ void MainWindow::displayIndexingResults(int nOrientations, LaueOrientations *ori
 		indexingWidget->setItem(i, 3, newItem3);
 	}
 	
-	indexingWidget->setCurrentCell(0,0);
+	indexingWidget->clearSelection();
+	indexingWidget->setCurrentCell(-1,-1);
 }
 
 void MainWindow::clearIndexingResults(void) {
+	QSignalBlocker blocked(indexingWidget);
 	indexingWidget->clear();
 	indexingWidget->setColumnCount(0);
 	indexingWidget->setRowCount(0);

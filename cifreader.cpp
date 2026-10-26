@@ -335,12 +335,14 @@ Crystal structure(const Block &block) {
         if(crystal.getNRootAtoms() >= crystal.maxRootAtoms())
             fail("Too many atom sites for this space group. QLaue reserves at most 2048 symmetry-expanded atoms.");
         double x = number(xs.at(i), "fractional x"), y = number(ys.at(i), "fractional y"), z = number(zs.at(i), "fractional z");
-        crystal.addAtom(elementNumber(elements.at(i)), x, y, z);
+        if(!crystal.addAtom(elementNumber(elements.at(i)), x, y, z))
+            fail("Invalid atom site or atom capacity exceeded.");
     }
     QString name = value(block, {"_chemical_name_common", "_chemical_name_mineral", "_chemical_name_systematic", "_chemical_formula_sum"});
     if(name.isEmpty()) name = block.name;
     crystal.setName(name.toUtf8().constData());
-    crystal.spaceGroupGenerate();
+    if(!crystal.spaceGroupGenerate())
+        fail("The symmetry-expanded structure exceeds QLaue's atom limit.");
     return crystal;
 }
 } // namespace

@@ -26,18 +26,19 @@
 
 #include <QApplication>
 #include <algorithm>
+#include <cmath>
+#include <limits>
 using namespace std;
 
 #include "matrix.h"
 #include "atom.h"
 #include "crystal.h"
 #include "laue.h"
+#include <climits>
 #include "xray.h"
 
-LaueSpot::LaueSpot(void){
-	fromCharateristic = false;
-	return;
-}
+LaueSpot::LaueSpot(void) : x(0), y(0), polarX(0), polarY(0), h(0), k(0), l(0),
+    theta(0), phi(0), inten(0), detInten(0), multiplicity(0), fromCharateristic(false) {}
 
 double LaueSpot::H(void){
 	return h;
@@ -95,6 +96,8 @@ U(3,3), P(3,1), S(3,1)
 	U.identity();
 	P.identity();
 	S.identity();
+	numMatches = 0;
+	patternError = 0;
 }
 
 LaueOrientations::LaueOrientations(const LaueOrientations& L):
@@ -107,28 +110,11 @@ U(3,3), P(3,1), S(3,1)
 	patternError = L.patternError;
 }
 
-lauegram::lauegram() {
-	spot = new LaueSpot[65000];
-	init();
-}
-
-lauegram::lauegram(const lauegram& L) :
-XRay() {
-	spot = new LaueSpot[65000];
-	
-	nspots = L.nspots;
-	debug = L.debug;
-	fsDistance = L.fsDistance;
-	inten_thresh = L.inten_thresh;
-	
-	maxKvec = L.maxKvec;
-	minKvec = L.minKvec;
-	
-	detlevel = L.detlevel;
-	detsaturation = L.detsaturation;
-}
+lauegram::lauegram() { init(); }
+lauegram::lauegram(const lauegram& L) = default;
 
 void lauegram::init(void) {
+	spot.clear();
 	
 	nspots = 0;	
 	fsDistance = 35; // mm
@@ -169,28 +155,12 @@ void lauegram::init(void) {
 	indexingAngularTol = 1.5 * 4 * atan(1) / 180;
 }
 
-lauegram::~lauegram() {
-	delete [] spot;
-}
+lauegram::~lauegram() = default;
+lauegram& lauegram::operator=(const lauegram &L) = default;
 
-lauegram& lauegram::operator=(const lauegram &L){
-
-	nspots = L.nspots;
-	debug = L.debug;
-	fsDistance = L.fsDistance;
-	inten_thresh = L.inten_thresh;
-	
-	maxKvec = L.maxKvec;
-	minKvec = L.minKvec;
-	
-	detlevel = L.detlevel;
-	detsaturation = L.detsaturation;
-	
-	for(int i=0;i<nspots;i++){
-		spot[i] = L.spot[i];
-	}
-	
-	return *this;
+void lauegram::copySpotsFrom(const lauegram &other) {
+    spot = other.spot;
+    nspots = spot.size();
 }
 
 void lauegram::setDet(double dl, double ds){
@@ -227,7 +197,7 @@ void lauegram::setDebug(int value){
 }
 
 void lauegram::setDistance(double d){
-	fsDistance = d;
+	if(std::isfinite(d) && d > 0) fsDistance = d;
 }
 
 double lauegram::getDistance(void) {
@@ -265,6 +235,8 @@ double lauegram::maxSpotInten(double minx, double maxx, double miny, double maxy
 }
 
 void lauegram::setLambdaRange(double min, double max){
+	if(!std::isfinite(min) || !std::isfinite(max) || min <= 0 || max < min ||
+	   !std::isfinite(1/min) || 1/max <= 0) return;
 	minKvec = 1 / max;
 	maxKvec = 1 / min;
 }
@@ -277,79 +249,44 @@ double lauegram::getLambdaRangeMin(void){
 	return 1 / maxKvec;
 }
 
-bool lauegram::calc(Crystal *crystal, bool* abort, int *spotcount) {
-	// Calculate the lauegram from a given 
-	bool abortcheck = !(abort == 0);
-	
-	// Set the maximum HKL from max lambda
-	if(debug){
-		if(intensityCorrection() & IntensitySelfAbsorption)
-			cerr << "lauegram::calc() : Calc self abs" << endl;
-		if(intensityCorrection() & IntensityXRayTube)
-			cerr << "lauegram::calc() : Calc tube responce" << endl;
-		if(intensityCorrection() & IntensityLorentz)
-			cerr << "lauegram::calc() : Calc Lorentz factor" << endl;
-		if(intensityCorrection() & IntensityPolarization)
-			cerr << "lauegram::calc() : Calc Poln Factor" << endl;
-	}
-	if(crystal == 0)
-		return false;
-	
-	int maxH = (int)(2.0 * maxKvec * crystal->getLatticeA() / calc_precision);
-	int maxK = (int)(2.0 * maxKvec * crystal->getLatticeB() / calc_precision);
-	int maxL = (int)(2.0 * maxKvec * crystal->getLatticeC() / calc_precision);
-	
-	if(debug){
-		cerr << "lauegram::calc() : maxKvec = " << maxKvec << endl;
-		cerr << "lauegram::calc() : Max H = " << maxH << endl;
-		cerr << "lauegram::calc() : Max K = " << maxK << endl;
-		cerr << "lauegram::calc() : Max L = " << maxL << endl;
-	}
-	
-	int spotn = 0;
-	
-	for(int h=0; h<=maxH; h++){
-		for(int k=0; k<=maxK; k++){
-			for(int l=0; l<=maxL; l++){
-			
-				int mask = ((h == 0) ? 1 : 0);
-				mask = mask << ((k == 0) ? 1 : 0);
-				mask = mask << ((l == 0) ? 1 : 0);
-				
-				for(int n=0;n<=7;n++){
-					if( n & mask)
-						continue;
-					int th = h * ( (n & 1) ? -1 : 1);
-					int tk = k * ( (n & 2) ? -1 : 1);
-					int tl = l * ( (n & 4) ? -1 : 1);
-					if(calcHKL(crystal, &spot[spotn],th,tk,tl)){
-						if(spotcount != 0){
-							// Do something ?? 
-							// To follow up!
-						}	
-						spotn++;
-					}
-				}
-				
-				if(abortcheck){
-					if(*abort){
-						//cerr << "lauegram::calc() : aborted" << endl;
-						nspots = spotn;
-						return false;
-					}
-				}
-				
-			}	
-		}
-	}
-	
-	if(debug)
-		cerr << "lauegram::calc() : Calculated " << spotn << " spots" << endl;
-	nspots = spotn;
-	return true;
+bool lauegram::calc(Crystal *crystal, const std::function<bool(int)> &progress) {
+    spot.clear();
+    nspots = 0;
+    if(!crystal || calc_precision <= 0 || !std::isfinite(fsDistance) || fsDistance <= 0 ||
+       !std::isfinite(minKvec) || minKvec <= 0 || !std::isfinite(maxKvec) || maxKvec < minKvec)
+        return false;
+    const double bounds[] = {2*maxKvec*crystal->getLatticeA()/calc_precision,
+                             2*maxKvec*crystal->getLatticeB()/calc_precision,
+                             2*maxKvec*crystal->getLatticeC()/calc_precision};
+    for(double bound : bounds)
+        if(!std::isfinite(bound) || bound < 0 || bound >= INT_MAX) return false;
+    const int maxH = int(bounds[0]), maxK = int(bounds[1]), maxL = int(bounds[2]);
+    for(int h=0; h<=maxH; ++h) {
+        for(int k=0; k<=maxK; ++k) {
+            if(progress && progress(int(100.0 * (h + double(k)/(maxK+1.0))/(maxH+1.0))))
+                return false;
+            for(int l=0; l<=maxL; ++l) {
+                if((l & 63) == 0 && progress &&
+                   progress(int(100.0*(h+(k+double(l)/(maxL+1.0))/(maxK+1.0))/(maxH+1.0))))
+                    return false;
+                const int mask = (h == 0 ? 1 : 0) | (k == 0 ? 2 : 0) | (l == 0 ? 4 : 0);
+                for(int n=0; n<8; ++n) {
+                    if(n & mask) continue;
+                    LaueSpot candidate;
+                    if(calcHKL(crystal, &candidate, h*(n&1 ? -1 : 1),
+                               k*(n&2 ? -1 : 1), l*(n&4 ? -1 : 1))) {
+                        spot.append(candidate);
+                        nspots = spot.size();
+                    }
+                }
+            }
+        }
+    }
+    return !progress || !progress(100);
 }
 
 bool lauegram::isFundamental(int h, int k, int l){
+	if(h == 0 && k == 0 && l == 0) return false;
 	int maxdiv = abs(h);
 	
 	if( abs(k) > maxdiv )
@@ -372,7 +309,10 @@ bool lauegram::isFundamental(int h, int k, int l){
 	return true;
 }
 	
-bool lauegram::calcHKL(Crystal *crystal, LaueSpot *spot, int h, int k, int l){
+bool lauegram::calcHKL(Crystal *crystal, LaueSpot *spot, int h, int k, int l, bool positionsOnly){
+	if(!crystal || !spot || !std::isfinite(fsDistance) || fsDistance <= 0 ||
+	   !std::isfinite(maxKvec) || !std::isfinite(minKvec) || minKvec <= 0 || maxKvec < minKvec)
+		return false;
 	Matrix G(3,1);
 	Matrix R(3,1);
 	Matrix kpri(3,1);
@@ -404,6 +344,7 @@ bool lauegram::calcHKL(Crystal *crystal, LaueSpot *spot, int h, int k, int l){
 	R = Matrix(h,k,l);
 	G = crystal->getUB() * R;
 	double magG = G.mag();
+	if(!std::isfinite(magG) || magG <= 0 || G.Get(0,0) <= 0) return false;
 	
 	if(debug){
 		cerr << "G:" << endl;
@@ -419,7 +360,7 @@ bool lauegram::calcHKL(Crystal *crystal, LaueSpot *spot, int h, int k, int l){
 	
 	// If the k_in_len is negative then the spot is pointing in the wrong direction!
 	
-	if(k_in_len <= 0)
+	if(!std::isfinite(k_in_len) || k_in_len <= 0)
 		return 0;
 	
 	// Now calculate the k_out vector
@@ -427,13 +368,27 @@ bool lauegram::calcHKL(Crystal *crystal, LaueSpot *spot, int h, int k, int l){
 	
 	// Remove spots pointing in the wrong direction
 	
-	if(kpri.dot(k_in) > 0){
+	if(kpri.Get(0,0) <= 1e-12){
 		return 0;
 	}
 	
 	// Calculate the maximum diffraction order
 	
 	double maxdo = maxKvec / k_in_len;
+	const double firstOrder = std::max(1.0, std::ceil(minKvec/k_in_len - 1e-10));
+	const double lastOrder = std::floor(maxdo + 1e-10);
+	if(!std::isfinite(lastOrder) || lastOrder > std::numeric_limits<int>::max() || firstOrder > lastOrder)
+		return false;
+
+	if(positionsOnly) {
+		const double x = -fsDistance * kpri.Get(1,0) / kpri.Get(0,0);
+		const double y = fsDistance * kpri.Get(2,0) / kpri.Get(0,0);
+		if(!std::isfinite(x) || !std::isfinite(y)) return false;
+		spot->setXYIN(x,y,1,int(lastOrder-firstOrder+1));
+		spot->setHKL(h,k,l);
+		spot->setCharacteristic(false);
+		return true;
+	}
 	
 	if(debug){
 		cerr << "maxdo = " << maxdo << endl;
@@ -449,7 +404,7 @@ bool lauegram::calcHKL(Crystal *crystal, LaueSpot *spot, int h, int k, int l){
 	}
 	
 	double tth = kpri.dot(k_in * -1) / ((k_in * -1).mag() * kpri.mag());
-	tth = M_PI - acos(tth);
+	tth = M_PI - acos(std::max(-1.0, std::min(1.0, tth)));
 	
 	if(debug){
 		if((h == 1) && ((k + l) == 0)){
@@ -467,7 +422,7 @@ bool lauegram::calcHKL(Crystal *crystal, LaueSpot *spot, int h, int k, int l){
 	double inten = 0;
 	int ndocalc = 1;
 	
-	for(int n = 1; n <= abs((int)maxdo) ; n++){
+	for(int n = int(firstOrder); n <= int(lastOrder); n++){
 		int hh = h * n;
 		int kk = k * n;
 		int ll = l * n;
@@ -493,7 +448,7 @@ bool lauegram::calcHKL(Crystal *crystal, LaueSpot *spot, int h, int k, int l){
 		if(intensityCorrection() & IntensitySelfAbsorption)
 			thisinten = thisinten * calcAbs( crystal, 1.0 / this_k_in_len , tth / 2);
 		if(intensityCorrection() & IntensityXRayTube)
-			thisinten = thisinten * tubeIntensity( 1.0 / this_k_in_len , HC_OVER_E / minKvec);
+			thisinten = thisinten * tubeIntensity( 1.0 / this_k_in_len , HC_OVER_E * maxKvec);
 		thisinten = thisinten * calcIntensityCorrection( 1.0 / this_k_in_len, tth);	
 		inten = inten + thisinten;
 		
@@ -596,143 +551,144 @@ Matrix lauegram::filmposToVector(double x, double y){
 
 // Indexing routines (opperate on the lauegram class)
 
-int lauegram::indexLaue(Crystal *crystal, int numIndexSpots, double indexSpots[100][2], int *nOrientations, LaueOrientations *orientations) {
-	if(numIndexSpots < 2)
-		return false;
+LaueIndexingResult lauegram::indexLaue(const Crystal &source, const QVector<QPointF> &points,
+        const std::function<bool(int)> &progress) {
+    LaueIndexingResult result;
+    auto fail = [&](const QString &message) {
+        result.error = message;
+        return result;
+    };
+    if(points.size() < 2 || points.size() > MaxIndexingSpots)
+        return fail(QString("Select between 2 and %1 spots.").arg(MaxIndexingSpots));
+    if(indexingMaxH < 0 || indexingMaxH > MaxIndexingRange ||
+       indexingMaxK < 0 || indexingMaxK > MaxIndexingRange ||
+       indexingMaxL < 0 || indexingMaxL > MaxIndexingRange ||
+       indexingMaxH + indexingMaxK + indexingMaxL == 0)
+        return fail(QString("H, K and L must be between 0 and %1, with at least one nonzero range.")
+                    .arg(MaxIndexingRange));
+    if(!std::isfinite(indexingAngularTol) || indexingAngularTol <= 0 || indexingAngularTol >= M_PI/2 ||
+       !std::isfinite(indexingSpotTol) || indexingSpotTol <= 0 || indexingSpotTol > 1000)
+        return fail("Enter a spot tolerance between 0 and 1000 mm and an angular tolerance between 0 and 90 degrees (both greater than zero).");
+    if(!std::isfinite(fsDistance) || fsDistance <= 0 ||
+       !std::isfinite(minKvec) || !std::isfinite(maxKvec) || minKvec <= 0 || maxKvec < minKvec)
+        return fail("Set a positive sample-to-detector distance and a valid wavelength range.");
+    Crystal candidate(source);
+    if(!Crystal::isValidLattice(candidate.getLatticeA(), candidate.getLatticeB(), candidate.getLatticeC(),
+            candidate.getLatticeAlpha(), candidate.getLatticeBeta(), candidate.getLatticeGamma()))
+        return fail("Set a valid crystal lattice before indexing.");
+    for(int i = 0; i < points.size(); ++i) {
+        if(!std::isfinite(points[i].x()) || !std::isfinite(points[i].y()))
+            return fail("Spot coordinates must be finite.");
+        for(int j = 0; j < i; ++j)
+            if(std::hypot(points[i].x()-points[j].x(), points[i].y()-points[j].y()) < 1e-8)
+                return fail("The same spot was selected more than once. Select distinct spots.");
+    }
+    Matrix primary = filmposToVector(points[0].x(), points[0].y());
+    Matrix secondary = filmposToVector(points[1].x(), points[1].y());
+    if(!std::isfinite(primary.mag()) || !std::isfinite(secondary.mag()) ||
+       (primary ^ secondary).mag() < 1e-6)
+        return fail("The first two spots are too close to determine an orientation. Select separated spots.");
+    const double theta = std::acos(std::max(-1.0, std::min(1.0, primary.dot(secondary))));
 
-	*nOrientations = 0;
+    // Cache reciprocal directions once; (0,0,0) and harmonic duplicates do not define new spots.
+    struct Reflection { int h, k, l; Matrix direction; };
+    QVector<Reflection> reflections;
+    Matrix b = candidate.getB();
+    for(int h = -indexingMaxH; h <= indexingMaxH; ++h)
+        for(int k = -indexingMaxK; k <= indexingMaxK; ++k)
+            for(int l = -indexingMaxL; l <= indexingMaxL; ++l) {
+                if(!isFundamental(h,k,l)) continue;
+                Matrix g = b * Matrix(h,k,l);
+                if(!std::isfinite(g.mag()) || g.mag() <= 0)
+                    return fail("The crystal reciprocal lattice is invalid.");
+                reflections.append({h,k,l,g/g.mag()});
+            }
+    const qint64 total = qint64(reflections.size()) * reflections.size();
+    qint64 completed = 0;
+    auto canceled = [&]() {
+        if(progress && progress(total ? int(100*completed/total) : 100)) {
+            result.canceled = true;
+            result.orientations.clear();
+            return true;
+        }
+        return false;
+    };
+    if(canceled()) return result;
 
-	Matrix primary(fsDistance,-1.0 * indexSpots[0][0] , indexSpots[0][1]);
-	Matrix secondary(fsDistance, -1.0 * indexSpots[1][0] , indexSpots[1][1]);
-	Matrix k_in(1,0,0);
-	
-	primary = k_in + (primary / primary.mag());
-	secondary = k_in + (secondary / secondary.mag());
+    // Index positions only. This intentionally does not use the legacy intensity model
+    // as a filter; forbidden/weak reflections and experimental intensities need review.
+    const double tolerance2 = indexingSpotTol * indexingSpotTol;
+    for(int p = 0; p < reflections.size(); ++p) {
+        const Reflection &r1 = reflections[p];
+        for(int s = 0; s < reflections.size(); ++s) {
+            ++completed;
+            if((completed & 127) == 0 && canceled()) return result;
+            const Reflection &r2 = reflections[s];
+            const double gamma = std::acos(std::max(-1.0, std::min(1.0, r1.direction.dot(r2.direction))));
+            if(std::abs(gamma-theta) > indexingAngularTol || (r1.direction ^ r2.direction).mag() < 1e-6)
+                continue;
+            if(!candidate.setU(primary, secondary, Matrix(r1.h,r1.k,r1.l), Matrix(r2.h,r2.k,r2.l))) continue;
+            LaueSpot first, second;
+            if(!calcHKL(&candidate,&first,r1.h,r1.k,r1.l,true) ||
+               !calcHKL(&candidate,&second,r2.h,r2.k,r2.l,true)) continue;
+            auto distance2 = [](LaueSpot &spot, const QPointF &point) {
+                const double dx = spot.X()-point.x(), dy = spot.Y()-point.y();
+                return dx*dx+dy*dy;
+            };
+            double error = distance2(first,points[0]) + distance2(second,points[1]);
+            if(distance2(first,points[0]) > tolerance2 || distance2(second,points[1]) > tolerance2) continue;
 
-	double theta = cos(primary.dot(secondary) / (primary.mag() * secondary.mag()));
-
-	int maxH = indexingMaxH; int maxK = indexingMaxK ; int maxL = indexingMaxL;
-
-	Crystal newOrient = *crystal;
-	newOrient.setFreeRotate(true);
-	
-	int oldCalcIntensities = calcIntensities();
-	setCalcIntensities(false);
-	
-	for(int h1 = (-1 * maxH) ; h1 <= maxH ; h1++){
-		for(int k1 = (-1 * maxK) ; k1 <= maxK ; k1++){
-			for(int l1 = (-1 * maxL) ; l1 <= maxL ; l1++){
-				for(int h2 = (-1 * maxH) ; h2 <= maxH ; h2++){
-					for(int k2 = (-1 * maxK) ; k2 <= maxK ; k2++){
-						for(int l2 = (-1 * maxL) ; l2 <= maxL ; l2++){
-							if(isFundamental(h1,k1,l1)){
-								if(isFundamental(h2,k2,l2)){
-									// Check the angle between vectors
-									Matrix vec1(h1,k1,l1);
-									Matrix vec2(h2,k2,l2);
-									
-									vec1 = crystal->getB() * vec1;
-									vec1 = vec1 / vec1.mag();
-									vec2 = crystal->getB() * vec2;
-									vec2 = vec2 / vec2.mag();
-									
-									double gamma = cos(vec1.dot(vec2));
-									
-									if(abs(gamma - theta) < indexingAngularTol){
-										// Ok so we have a match to primary and secondary
-										// try all other reflections then
-										//cerr << "MATCH : (" << h1 << "," << k1 << "," << l1 << ") and (";
-										//cerr << h2 << "," << k2 << "," << l2 << ")" << endl;
-										// Now calculate a possible U matrix from the Primary and Secondary
-										
-										Matrix Tc(3,3), Td(3,3), newU(3,3);
-										Matrix Tc2(3,1), Tc3(3,1);
-										Matrix Td2(3,1), Td3(3,1);
-										
-										Tc3 = vec1 ^ vec2;
-										Tc3 = Tc3 / Tc3.mag();
-										Tc2 = Tc3 ^ vec1;
-										Tc2 = Tc2 / Tc2.mag();
-										
-										primary = primary / primary.mag();
-										secondary = secondary / secondary.mag();
-										
-										Td3 = primary ^ secondary;
-										Td3 = Td3 / Td3.mag();
-										Td2 = Td3 ^ primary;
-										Td2 = Td2 / Td2.mag();
-										
-										for(int i = 0 ; i < 3 ; i++ ){
-											// Load up the matricies Tc and Td;
-											Tc.Set(i,0,vec1.Get(i,0));
-											Tc.Set(i,1,Tc2.Get(i,0));
-											Tc.Set(i,2,Tc3.Get(i,0));
-											
-											Td.Set(i,0,primary.Get(i,0));
-											Td.Set(i,1,Td2.Get(i,0));
-											Td.Set(i,2,Td3.Get(i,0));
-										}
-										
-										newU = Td * Tc.transpose();
-										newOrient.setU(newU);
-										
-										// Now calculate spot position for secondary
-										
-										LaueSpot s;
-										if(calcHKL(&newOrient, &s, h2,k2,l2)) {
-											// Check if this spot is in the right place.
-											
-											double diff = pow(pow(s.X() - indexSpots[1][0],2) + pow(s.Y() - indexSpots[1][1],2),0.5);
-											
-											if(abs(diff) < indexingSpotTol){
-												bool abort = false;
-												int spotcount = 0;
-												calc(&newOrient, &abort, &spotcount);
-										
-												int nFoundSpots = 2;
-												double error = 0;
-										
-												for(int n = 2; n < numIndexSpots ; n++){
-													// Check if there is a spot in this place
-													int sn = findSpot(indexSpots[n][0], indexSpots[n][1], indexingSpotTol);
-													if( sn != -1){
-														nFoundSpots++;
-														error = error + pow(pow(spot[sn].X() - indexSpots[n][0],2) + pow(spot[sn].Y() - indexSpots[n][1],2),0.5);
-													}
-												}
-												
-												// Now store the solution
-												//cerr << "Orientations = " << (*nOrientations) << endl;
-												orientations[*nOrientations].setU(newU);
-												orientations[*nOrientations].setNumMatches(nFoundSpots);							
-												orientations[*nOrientations].setPatternError(error / nFoundSpots);
-												orientations[*nOrientations].setP(h1,k1,l1);
-												orientations[*nOrientations].setS(h2,k2,l2);
-												(*nOrientations)++;
-											}
-										}
-									}
-								}
-							}
-						}
-					}
-				}
-			}
-		}
-	}
-	
-	sort(orientations, orientations + (*nOrientations));
-	
-	// reset calcinten
-	
-	setCalcIntensities(oldCalcIntensities);
-	
-	// Recalculate on origional crystal
-	
-	bool abort = false; int spotcount = 0;
-	calc(crystal, &abort, &spotcount);
-	
-	return true;
+            // Reserve the seed reflections. Each predicted spot may explain only one observation.
+            struct Match { double error; int point, reflection; };
+            QVector<Match> matches;
+            for(int r = 0; r < reflections.size() && points.size() > 2; ++r) {
+                if((r & 127) == 0 && canceled()) return result;
+                if(r == p || r == s) continue;
+                const Reflection &reflection = reflections[r];
+                LaueSpot spot;
+                if(!calcHKL(&candidate,&spot,reflection.h,reflection.k,reflection.l,true)) continue;
+                for(int i = 2; i < points.size(); ++i) {
+                    const double d2 = distance2(spot,points[i]);
+                    if(d2 <= tolerance2) matches.append({d2,i,r});
+                }
+            }
+            std::sort(matches.begin(), matches.end(), [](const Match &a, const Match &b) {
+                if(a.error != b.error) return a.error < b.error;
+                if(a.point != b.point) return a.point < b.point;
+                return a.reflection < b.reflection;
+            });
+            QVector<bool> usedPoints(points.size(),false), usedReflections(reflections.size(),false);
+            int hits = 2;
+            for(const Match &match : matches) {
+                if(usedPoints[match.point] || usedReflections[match.reflection]) continue;
+                usedPoints[match.point] = usedReflections[match.reflection] = true;
+                error += match.error;
+                ++hits;
+            }
+            LaueOrientations orientation;
+            orientation.setU(candidate.getU());
+            orientation.setP(r1.h,r1.k,r1.l);
+            orientation.setS(r2.h,r2.k,r2.l);
+            orientation.setNumMatches(hits);
+            orientation.setPatternError(std::sqrt(error/hits));
+            // ponytail: keep the best 1000 candidates in a heap; crystal-symmetry
+            // reduction can replace this ceiling if larger searches need it.
+            if(result.orientations.size() < MaxIndexingResults) {
+                result.orientations.append(orientation);
+                std::push_heap(result.orientations.begin(),result.orientations.end());
+            } else {
+                result.truncated = true;
+                if(orientation < result.orientations.first()) {
+                    std::pop_heap(result.orientations.begin(),result.orientations.end());
+                    result.orientations.last() = orientation;
+                    std::push_heap(result.orientations.begin(),result.orientations.end());
+                }
+            }
+        }
+    }
+    if(canceled()) return result;
+    std::sort(result.orientations.begin(),result.orientations.end());
+    return result;
 }
 
 bool operator<(const LaueOrientations& a, const LaueOrientations& b){
@@ -751,6 +707,8 @@ Reorientation::Reorientation():
 primary(3,1), secondary(3,1), UB(3,3)
 { 
 	mode = Unknown;
+	for(auto &row : angles) std::fill(row,row+3,0.0);
+	std::fill(valid, valid+8, false);
 }
 
 int Reorientation::getMode(void){
@@ -758,18 +716,22 @@ int Reorientation::getMode(void){
 }
 
 void Reorientation::setPrimary(const Matrix p){
+	std::fill(valid,valid+8,false);
 	primary = p;
 }
 
 void Reorientation::setSecondary(const Matrix s){
+	std::fill(valid,valid+8,false);
 	secondary = s;
 }
 
 void Reorientation::setPrimary(double a, double b, double c){
+	std::fill(valid,valid+8,false);
 	primary = Matrix(a,b,c);
 }
 
 void Reorientation::setSecondary(double a, double b, double c){
+	std::fill(valid,valid+8,false);
 	secondary = Matrix(a,b,c);
 }
 
@@ -777,76 +739,106 @@ void Reorientation::calc(void){
 	calc(XAxis);
 }
 
-void Reorientation::calc(int thismode){
-	Matrix hPhi(3,1);
-	Matrix hPhi2(3,1);
-	Matrix hPhi3(3,1);
-	Matrix R(3,3);
-	Matrix T(3,3);
-	
-	switch (thismode) {
-		case Reorientation::XAxis:
-			T = Matrix(1,0,0,0,1,0,0,0,1);
-			break;
-		case Reorientation::YAxis:
-			T = Matrix(0,1,0,0,0,1,1,0,0);
-			break;
-		case Reorientation::ZAxis:
-			T = Matrix(0,0,1,1,0,0,0,1,0);
-			break;
-		default:
-			T = Matrix(1,0,0,0,1,0,0,0,1);
-			break;
-	}
-	
-	hPhi = T * UB * primary;
-	
-	angles[0][0] = atan2(hPhi.Get(1,0),hPhi.Get(2,0));
-	angles[0][1] = atan2(sqrt(pow(hPhi.Get(2,0),2) + pow(hPhi.Get(1,0),2)), hPhi.Get(0,0));
-	angles[0][2] = 0.0;
-	angles[1][0] = M_PI + angles[0][0];
-	angles[1][1] = M_PI - angles[0][1];
-	angles[1][2] = 0.0;
+namespace {
+bool unitVector(Matrix &v) {
+    if(v.Rows()!=3 || v.Cols()!=1) return false;
+    double scale = 0;
+    for(int i=0;i<3;++i) {
+        if(!std::isfinite(v.Get(i,0))) return false;
+        scale = std::max(scale,std::abs(v.Get(i,0)));
+    }
+    if(scale==0) return false;
+    v = v / scale;
+    v = v / v.mag();
+    return true;
+}
+Matrix axisRotation(int axis, double angle) {
+    Matrix rotation(3,3);
+    if(axis==0) return rotation.rotateX(-angle);
+    if(axis==1) return rotation.rotateY(-angle);
+    return rotation.rotateZ(-angle);
+}
+Matrix appliedRotation(const double *angles) {
+    return axisRotation(2,angles[2])*axisRotation(1,angles[1])*axisRotation(0,angles[0]);
+}
+}
 
-	angles[2][0] = -1.0 * atan2(hPhi.Get(2,0),hPhi.Get(1,0));
-	angles[2][1] = 0.0;
-	angles[2][2] = -1.0 * atan2(sqrt(pow(hPhi.Get(2,0),2) + pow(hPhi.Get(1,0),2)),hPhi.Get(0,0));
-	angles[3][0] = M_PI + angles[2][0];
-	angles[3][1] = 0.0;
-	angles[3][2] = M_PI - angles[2][2];
-	
-	
-	angles[4][0] = 0.0;
-	angles[4][1] = atan2(hPhi.Get(2,0),hPhi.Get(0,0));
-	angles[4][2] = -1.0 * atan2(hPhi.Get(1,0), sqrt(pow(hPhi.Get(0,0),2) + pow(hPhi.Get(2,0),2)));
-	angles[5][0] = 0.0;
-	angles[5][1] = M_PI + angles[4][1];
-	angles[5][2] = M_PI - angles[4][2];
-	
-	if(thismode == Zone){
-		hPhi2 = T * UB * secondary;
-	
-		angles[6][0] = atan2(hPhi2.Get(1,0),hPhi2.Get(2,0));
-	
-		R = R.rotateX(-1.0 * angles[6][0]);
-		hPhi3 = R * hPhi;
-		
-		angles[6][1] = atan2(hPhi3.Get(2,0),hPhi3.Get(0,0));
-		angles[6][2] = -1.0 * atan2(hPhi3.Get(1,0), sqrt(pow(hPhi3.Get(0,0),2) + pow(hPhi3.Get(2,0),2)));
-		angles[7][0] = angles[6][0];
-		angles[7][1] = M_PI + angles[6][1];
-		angles[7][2] = M_PI - angles[6][2];
-	} else {
-		angles[6][0] = 0.0;
-		angles[6][1] = 0.0;
-		angles[6][2] = 0.0;
-		angles[7][0] = 0.0;
-		angles[7][1] = 0.0;
-		angles[7][2] = 0.0;
-	}
+int Reorientation::getValidCount() const {
+    return std::count(valid,valid+8,true);
+}
+
+void Reorientation::calc(int thismode) {
+    mode = thismode;
+    std::fill(valid,valid+8,false);
+    for(auto &row : angles) std::fill(row,row+3,0.0);
+    Matrix p = primary;
+    if(!unitVector(p)) return;
+    p = UB * p;
+    if(!unitVector(p)) return;
+    if(mode == Zone) {
+        Matrix s = secondary;
+        if(!unitVector(s)) return;
+        s = UB * s;
+        if(!unitVector(s) || std::abs(p.dot(s)) > 1e-8) return;
+        // Both requested axes must be attainable by a rigid rotation.
+        Matrix y = s ^ p;
+        if(!unitVector(y)) return;
+        Matrix z = p ^ y;
+        Matrix rotation(p.Get(0,0),p.Get(1,0),p.Get(2,0),
+                        y.Get(0,0),y.Get(1,0),y.Get(2,0),
+                        z.Get(0,0),z.Get(1,0),z.Get(2,0));
+        angles[6][1] = std::asin(std::max(-1.0,std::min(1.0,-rotation.Get(2,0))));
+        if(std::abs(std::cos(angles[6][1])) > 1e-10) {
+            angles[6][0] = std::atan2(rotation.Get(2,1),rotation.Get(2,2));
+            angles[6][2] = std::atan2(rotation.Get(1,0),rotation.Get(0,0));
+        } else {
+            angles[6][0] = 0;
+            angles[6][2] = std::atan2(-rotation.Get(0,1),rotation.Get(1,1));
+        }
+        angles[7][0] = angles[6][0] + M_PI;
+        angles[7][1] = M_PI - angles[6][1];
+        angles[7][2] = angles[6][2] + M_PI;
+        for(int row=6;row<8;++row) {
+            Matrix r = appliedRotation(angles[row]);
+            valid[row] = (r*p-Matrix(1,0,0)).mag() < 1e-8 &&
+                         (r*s-Matrix(0,0,1)).mag() < 1e-8;
+        }
+        return;
+    }
+    if(mode < XAxis || mode > ZAxis) { mode = Unknown; return; }
+    Matrix target(0,0,0);
+    target.Set(mode-1,0,1);
+    const int pairs[3][2] = {{0,1},{0,2},{1,2}};
+    for(int pair=0;pair<3;++pair) {
+        const int a=pairs[pair][0], b=pairs[pair][1];
+        // The second rotation preserves component b. Solve the first angle
+        // from c*cos(angle) + s*sin(angle) + offset = target[b].
+        const double offset = a==b ? p.Get(b,0) : 0.0;
+        const double c = p.Get(b,0)-offset;
+        const double s = (axisRotation(a,M_PI/2)*p).Get(b,0)-offset;
+        const double radius = std::hypot(c,s);
+        double first[2] = {0,M_PI};
+        if(radius > 1e-12) {
+            const double ratio = (target.Get(b,0)-offset)/radius;
+            if(std::abs(ratio) > 1+1e-12) continue;
+            const double delta = std::acos(std::max(-1.0,std::min(1.0,ratio)));
+            first[0] = std::atan2(s,c)+delta;
+            first[1] = std::atan2(s,c)-delta;
+        } else if(std::abs(target.Get(b,0)-offset) > 1e-10) continue;
+        for(int choice=0;choice<2;++choice) {
+            const int row=pair*2+choice;
+            Matrix intermediate = axisRotation(a,first[choice])*p;
+            Matrix cross = intermediate ^ target;
+            angles[row][a] = first[choice];
+            angles[row][b] = std::atan2(cross.Get(b,0),
+                intermediate.dot(target)-intermediate.Get(b,0)*target.Get(b,0));
+            valid[row] = (appliedRotation(angles[row])*p-target).mag() < 1e-8;
+        }
+    }
 }
 
 void Reorientation::setUB(const Matrix newUB){
+	std::fill(valid,valid+8,false);
 	UB = newUB;
 }
 
@@ -865,4 +857,3 @@ Matrix Reorientation::getSecondary(void){
 // **********************************************************************************
 
 // LaueReorientation Routines
-

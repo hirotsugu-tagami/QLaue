@@ -29,8 +29,6 @@
 
 #include <QWidget>
 #include <QThread>
-#include <QMutex>
-#include <QWaitCondition>
 #include <QRubberBand>
 #include <QPrinter>
 #include "laue.h"
@@ -40,18 +38,26 @@
 
 class LaueThread : public QThread, public lauegram {
 	Q_OBJECT
-	Crystal* crystal;
-	QMutex mutex;
-	QWaitCondition condition;
-	bool restart, abort;
+	// The GUI owns the inherited settings and published spots. run() only
+	// touches activeCrystal/activeCalculation until finished() has been joined.
+	Crystal activeCrystal, pendingCrystal;
+	lauegram activeCalculation, pendingCalculation;
+	bool hasPending = false;
+	bool calculationActive = false;
+	bool activeComplete = false;
+	void launchPending();
+private slots:
+	void finishCalculation();
 public:
 	LaueThread(QObject *parent = 0);
 	~LaueThread();
 	void startCalculation(Crystal *c);
+	bool isCalculating() const { return calculationActive || hasPending; }
 protected:
 	void run();
 signals:
 	void calculated(void);
+	void calculationFailed(QString message);
 	void partialCalc(void);
 	void spotsToGo(int);
 	void calcStarted(void);
@@ -60,29 +66,18 @@ signals:
 class LaueIndexingThread : public QThread, public lauegram {
 	Q_OBJECT
 	Crystal newOrient;
-	QMutex mutex;
-	QWaitCondition condition;
-	bool restart, abort;
-	int numIndexSpots;
-	double *indexSpotsX;
-	double *indexSpotsY;
-	int nOrientations;
-	LaueOrientations *orientations;
-	int niterations;
+	QVector<QPointF> indexSpots;
+	LaueIndexingResult indexingResult;
 public:
 	LaueIndexingThread(QObject *parent = 0);
 	~LaueIndexingThread();
-	void indexLaue(Crystal *crystal, int numIndexSpots, 
-				   double *indexSpotsX, double *indexSpotsY);
-	int triesToGo(void)						{ return niterations; }
-	LaueOrientations getOrientations(int i) { return orientations[i]; }
-	int getMaxIterations(void);
+	bool indexLaue(const Crystal &crystal, const QVector<QPointF> &points);
+	// Read only after finished() and wait(); the worker owns this during a run.
+	const LaueIndexingResult &result() const { return indexingResult; }
 protected:
 	void run();
 signals:
-	void newIndexingAvaliable(int nOrientations, LaueOrientations *orientations);
-	void progress(int toGo);
-	void calcStarted(void);
+	void progress(int percent);
 };
 #else
 
@@ -110,8 +105,8 @@ private:
 	LaueThread *laue;
 	LaueIndexingThread *laueIndexing;
 	
-	LaueOrientations *orientations;
-	int numOrientations;
+	QVector<LaueOrientations> orientations;
+	bool indexingInProgress = false;
 
 	// Variables to control the user action
 	
@@ -119,6 +114,12 @@ private:
 	int userAction;
 	int userActionStage;
 	QPoint moveStart;
+	bool toolActive = false;
+	QPointF originPreview;
+	QCursor toolCursor;
+	bool toolHadCursor = false;
+	bool toolMouseTracking = false;
+	double toolOriginCircle = 0.5;
 	
 	// Variables to convert from world to pixels
 	
@@ -128,6 +129,10 @@ private:
 	// Bitmap laue image variables
 	
 	double pixels_per_mm;
+	int imageBrightnessValue = 0;
+	int imageContrastValue = 100;
+	int imageMaximumValue = 255;
+	int imageMinimumValue = 0;
 	
 	// Laue parameters
 	
@@ -136,6 +141,7 @@ private:
 	
 	int numOrientationSpots;
 	int numUBOrientationSpots;
+	quint64 orientationRevision = 0;
 	double *orientationSpotsX;
 	double *orientationSpotsY;
 	double UBOrientationSpotsX[2];
@@ -160,11 +166,12 @@ private:
 	
 	void paintLaue(QPainter *painter, QRect size);
 	void paintImage(QPainter *painter, QRect size);
+	void prepareImage(QRect size);
 	void paintLaueAxes(QPainter *painter, QRect laue);
 	void paintLaueBox(QPainter *painter, QRect laue);
 	void paintMsgBox(QPainter *painter, QRect msg);
 	void paintDummyFilm(QPainter *painter, QRect laue, QRect msg);
-	void paintOrigin(QPainter *painter, QRect size);
+	void paintOrigin(QPainter *painter, QRect size, bool preview = false);
 	void paintIndexing(QPainter *painter, QRect size);
 	void paintUBOrientationSpots(QPainter *painter, QRect size);
 	void paintRotateAboutCross(QPainter *painter, QRect size);
@@ -174,6 +181,9 @@ private:
 	int mmToPixels(double mm);
 	QPointF pixelsToWorld(QPoint pixel);
 	QPoint  worldToPixels(QPointF world);
+	void beginTool(int action);
+	void finishTool(bool accepted);
+	void calibrateScale(double value);
 	
 	void setBit(int *flags, int flag, int toset);
 	bool getBit(int flags, int flag);
@@ -193,14 +203,21 @@ public:
 	
 	LaueThread* getLaue(void)		{ return laue; }
 	LaueIndexingThread* getIndexing(void)	{return laueIndexing; }
-	LaueOrientations* getOrientations(void) {return orientations; }
+	const QVector<LaueOrientations> &getOrientations() const { return orientations; }
 	
 	double originX(void)			{ return laueOrigin.x(); }
 	double originY(void)			{ return laueOrigin.y(); }
 	double scale(void)				{ return pixels_per_mm; }
-	void setOriginX(double x)		{ laueOrigin.setX(x); }
-	void setOriginY(double x)		{ laueOrigin.setY(x); }
-	void setScale(double x)			{ pixels_per_mm = x; }
+	void setOriginX(double x);
+	void setOriginY(double y);
+	void setScale(double x);
+	int imageBrightness() const { return imageBrightnessValue; }
+	int imageContrast() const { return imageContrastValue; }
+	int imageMaximum() const { return imageMaximumValue; }
+	int imageMinimum() const { return imageMinimumValue; }
+	bool isImageInverted() const { return (display & DisplayImageInverted) != 0; }
+	bool isImageRotated() const { return (display & DisplayImageRotated) != 0; }
+	bool isImageDisplayed() const { return (display & DisplayImage) != 0; }
 	
 	enum {
 		NoPrintReorientation = 0,
@@ -281,6 +298,7 @@ public slots:
 	int  getAccuracy(void)							{ return (11 - laue->calcPrecision()); }
 	void solveOrientation(void);
 	void resolveOrientation(void);
+	void clearOrientationResults(void);
 	void clearOrientation(void);
 	void setOrientation(void);
 	void resetOrientation(void);
@@ -299,7 +317,7 @@ signals:
 	void rotationsChanged(double xx, double yy, double zz);
 	void recalculated(void);
 	void gotFocus(void);
-	void newIndexingAvaliable(int nOrientations, LaueOrientations *orientations);
+	void newIndexingAvailable();
 };
 
 #endif

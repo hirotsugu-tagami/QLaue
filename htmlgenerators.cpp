@@ -175,9 +175,7 @@ QString HtmlGenerators::laueToHtml(lauegram* laue){
 	html += QString("%1 mm").arg(laue->getDistance());
 	html += "<tr><td><b>Detector saturation:</b><td>";
 	html += QString("%1\%").arg(100 * laue->detSaturation());
-	html += "<tr><td><b>Detector threshhold:</b><td>";
-	html += QString("%1\%").arg(100 * laue->detLevel());
-	html += "<tr><td><b>Detector threshhold:</b><td>";
+	html += "<tr><td><b>Detector threshold:</b><td>";
 	html += QString("%1\%").arg(100 * laue->detLevel());
 	html += "<tr><td><b>Lambda max :</b><td>";
 	html += QString("%1 &Aring;").arg(laue->getLambdaRangeMax());
@@ -219,48 +217,30 @@ QString HtmlGenerators::crystalOrientationToHtml(Crystal *crystal){
 	return html;
 }
 
-QString HtmlGenerators::crystalOrientationToHtml(Reorientation *reorientation){
-	QString html;
-	
-	html  = "<b>Reorientation to reciprocal space axes:</b><br>";
-	html += "<table>\n<tr>";
-	html += "<td width=40\%>&nbsp;<td width=10\%>&nbsp;<td width=10\%>&nbsp;<td width=10\%>&nbsp;";
-	
-	html += "<tr><td><b>X-Axis:</b>";
-	Matrix axis(3,1);
-	axis = reorientation->getPrimary();;
-	html += QString("<td>%1").arg(axis.Get(0,0),5,'f',3);
-	html += QString("<td>%1").arg(axis.Get(1,0),5,'f',3);
-	html += QString("<td>%1").arg(axis.Get(2,0),5,'f',3);
-	
-	html += "<tr><td><b>Z-Axis:</b>";
-	axis = reorientation->getSecondary();
-	html += QString("<td>%1").arg(axis.Get(0,0),5,'f',3);
-	html += QString("<td>%1").arg(axis.Get(1,0),5,'f',3);
-	html += QString("<td>%1").arg(axis.Get(2,0),5,'f',3);
-	
-	html += "</table>";
-	
-	html += "<table>\n<tr>";
-	html += "<td width=20\%><b>Rotation X</b><td width=20\%><b>Rotation Y</b><td width=20\%><b>Rotation Z</b>";
-	if(reorientation->getMode() == Reorientation::XAxis){
-		for(int i=0;i<3;i++){
-			html += "<tr>";
-			double* angles = reorientation->getAngles(i);
-			for(int n=0;n<3;++n){
-				html += QString("<td>%1&#176;").arg(angles[n] * 180 / M_PI,5,'f',3, ' ');
-			}
-		}
-	} else {
-		html += "<tr>";
-		double* angles = reorientation->getAngles(3);
-		for(int n=0;n<3;++n){
-			html += QString("<td>%1&#176;").arg(angles[n] * 180 / M_PI,5,'f',3, ' ');
-		}
-	}
-	
-	html += "</table>";
-	
-	return html;
+QString HtmlGenerators::crystalOrientationToHtml(Reorientation *reorientation) {
+    QString html = "<b>Reorientation to reciprocal space axes:</b><br>";
+    if(reorientation->getValidCount() == 0)
+        return html + "No valid reorientation has been calculated.";
+    const int mode = reorientation->getMode();
+    const QString target = mode == Reorientation::YAxis ? "Y-Axis" :
+                           mode == Reorientation::ZAxis ? "Z-Axis" : "X-Axis";
+    auto axisRow = [](const QString &label, const Matrix &axis) {
+        return QString("<tr><td><b>%1:</b></td><td>%2</td><td>%3</td><td>%4</td></tr>")
+            .arg(label).arg(axis.Get(0,0),0,'f',3)
+            .arg(axis.Get(1,0),0,'f',3).arg(axis.Get(2,0),0,'f',3);
+    };
+    html += "<table>";
+    html += axisRow(target,reorientation->getPrimary());
+    if(mode == Reorientation::Zone)
+        html += axisRow("Z-Axis",reorientation->getSecondary());
+    html += "</table><table><tr><th>Rotation X</th><th>Rotation Y</th><th>Rotation Z</th></tr>";
+    for(int row=0; row<8; ++row) {
+        if(!reorientation->isValid(row)) continue;
+        const double *angles = reorientation->getAngles(row/2,row%2);
+        html += "<tr>";
+        for(int axis=0; axis<3; ++axis)
+            html += QString("<td>%1&#176;</td>").arg(angles[axis]*180/M_PI,0,'f',3);
+        html += "</tr>";
+    }
+    return html + "</table>";
 }
-	

@@ -27,6 +27,8 @@
 #include <QtCore>
 #include <QtGui>
 #include <QtWidgets>
+#include <algorithm>
+#include <cmath>
 #include "laue.h"
 #include "xray.h"
 #include "preferences.h"
@@ -44,24 +46,37 @@ void PreferencesDialog::setLaue(lauegram* laue){
 	ui.LaueLorentzCheckBox->setChecked(laue->intensityCorrection() & XRay::IntensityLorentz);
 	ui.LauePolnCheckBox->setChecked(laue->intensityCorrection() & XRay::IntensityPolarization);
 	ui.LaueSampleAbsCheckBox->setChecked(laue->intensityCorrection() & lauegram::IntensitySelfAbsorption);
+	ui.LaueXRayTubeButton->setChecked(laue->intensityCorrection() & lauegram::IntensityXRayTube);
+	ui.LaueOtherButton->setChecked(!(laue->intensityCorrection() & lauegram::IntensityXRayTube));
 
 	// Set tube voltage from max_k
-	
+	loadedLambdaMax = laue->getLambdaRangeMax();
+	const double minimumVoltage = std::ceil(HC_OVER_E / loadedLambdaMax * 10000) / 10000;
+	const QSignalBlocker voltageSignals(ui.LaueTubeVoltageSpinBox);
+	ui.LaueTubeVoltageSpinBox->setMaximum(std::max(100.0, HC_OVER_E / laue->getLambdaRangeMin()));
+	ui.LaueTubeVoltageSpinBox->setMinimum(minimumVoltage);
 	ui.LaueTubeVoltageSpinBox->setValue(HC_OVER_E / laue->getLambdaRangeMin());
+	shownTubeVoltage = ui.LaueTubeVoltageSpinBox->value();
 	ui.LaueLambdaMinSpinBox->setValue(laue->getLambdaRangeMin());
-	ui.LaueLambdaMaxSpinBox->setValue(laue->getLambdaRangeMax());
+	ui.LaueLambdaMaxSpinBox->setValue(loadedLambdaMax);
 	
 	QString setElement = QString(XRay::elementName(laue->tubeZ()));
-	for(int i=0;i< anodes.size(); ++i){
-		if(anodes.at(i) == setElement){
-			ui.LaueAnodeComboBox->setCurrentIndex(i);
-			break;
-		}
+	int index = ui.LaueAnodeComboBox->findText(setElement);
+	if(index < 0) {
+		ui.LaueAnodeComboBox->addItem(setElement);
+		index = ui.LaueAnodeComboBox->count()-1;
 	}
+	ui.LaueAnodeComboBox->setCurrentIndex(index);
 }
 
 void PreferencesDialog::getLaue(lauegram* laue){
-	int newinten = 0;
+	const bool voltageChanged = ui.LaueTubeVoltageSpinBox->value() != shownTubeVoltage;
+	const double newLambdaMin = HC_OVER_E / ui.LaueTubeVoltageSpinBox->value();
+	if(voltageChanged && (!std::isfinite(newLambdaMin) || newLambdaMin <= 0 ||
+	                      newLambdaMin > loadedLambdaMax)) return;
+	const int editable = XRay::IntensityLorentz | XRay::IntensityPolarization |
+	                     lauegram::IntensitySelfAbsorption | lauegram::IntensityXRayTube;
+	int newinten = laue->intensityCorrection() & ~editable;
 	if(ui.LaueLorentzCheckBox->isChecked())
 		newinten = newinten | XRay::IntensityLorentz;
 	if(ui.LauePolnCheckBox->isChecked())
@@ -73,7 +88,7 @@ void PreferencesDialog::getLaue(lauegram* laue){
 	
 	laue->setIntensityCorrection(newinten);
 	
-	laue->setLambdaRange(ui.LaueLambdaMinSpinBox->value(), ui.LaueLambdaMaxSpinBox->value());
+	if(voltageChanged) laue->setLambdaRange(newLambdaMin, loadedLambdaMax);
 	
 	int Z = XRay::elementNumber(ui.LaueAnodeComboBox->currentText().toLatin1());
 	if(Z != -1){

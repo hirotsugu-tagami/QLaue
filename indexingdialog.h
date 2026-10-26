@@ -39,6 +39,8 @@ public:
 	IndexingDialog(QWidget *parent);
 	void setIndexingParams(lauegram *laue);
 	void getIndexingParams(lauegram *laue);
+public slots:
+	void accept() override;
 private:
 	Ui::IndexingDialog ui;
 };

@@ -32,6 +32,7 @@
 ImageControlWidget::ImageControlWidget(QWidget *parent) : QWidget(parent) 
 {
 	ui.setupUi(this);
+    ui.BrightnessScroll->setMinimum(-100);
 	setFixedSize(QSize(ui.groupBox->width() + 20,ui.groupBox->height() + 20));
 	
 	setDefaults();
@@ -61,6 +62,14 @@ void ImageControlWidget::setDefaults(void){
 	ui.BrightnessScroll->setValue(0);
 }
 
+void ImageControlWidget::setValues(int brightness, int contrast, int maximum, int minimum) {
+    const QSignalBlocker blocked(this);
+    ui.BrightnessScroll->setValue(brightness);
+    ui.ContrastScroll->setValue(contrast);
+    ui.MaximumScroll->setValue(maximum);
+    ui.MinimumScroll->setValue(minimum);
+}
+
 void ImageControlWidget::changed(void){
 	// Read the values for image
 	int contrast = ui.ContrastScroll->value();
@@ -69,4 +78,3 @@ void ImageControlWidget::changed(void){
 	int max = ui.MaximumScroll->value();
 	emit valueChanged(brightness, contrast, max, min);
 }
-

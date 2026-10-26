@@ -66,8 +66,8 @@ private:
   
   // Matrix operatons.
   
-  double dot(Matrix other);
-  double mag(void);
+  double dot(Matrix other) const;
+  double mag(void) const;
   Matrix transpose(void);
   double det(void);
   Matrix inv(void);

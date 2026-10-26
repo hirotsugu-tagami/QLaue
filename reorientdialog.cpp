@@ -27,10 +27,13 @@
 #include <QtCore>
 #include <QtGui>
 #include <QtWidgets>
+#include <cmath>
 #include "reorientdialog.h"
 #include "laue.h"
 
-ReorientDialog::ReorientDialog(QWidget *parent) : QDialog(parent) {
+ReorientDialog::ReorientDialog(QWidget *parent) : QDialog(parent),
+    laue(nullptr), crystal(nullptr), selectedOrientation(false),
+    angleX(0), angleY(0), angleZ(0) {
 	ui.setupUi(this);
 	
 	ui.okButton->setEnabled(false);
@@ -48,28 +51,46 @@ ReorientDialog::ReorientDialog(QWidget *parent) : QDialog(parent) {
 	connect(ui.AngleRangeP, SIGNAL(toggled(bool)), this, SLOT(updateTable()));
 	connect(ui.AngleRangePM, SIGNAL(toggled(bool)), this, SLOT(updateTable()));
 	
-	ui.XAxisButton->setChecked(true);
+    connect(ui.DataTable, &QTableWidget::itemSelectionChanged, this, [this] {
+        const int row = ui.DataTable->currentRow();
+        ui.okButton->setEnabled(resultsCurrent && laue && laue->reorientation.isValid(row) &&
+                               !ui.DataTable->selectedItems().isEmpty());
+    });
+    auto invalidate = [this] {
+        resultsCurrent = false;
+        ui.DataTable->clearContents();
+        ui.DataTable->clearSelection();
+        ui.okButton->setEnabled(false);
+        ui.printButton->setEnabled(false);
+        selectedOrientation = false;
+    };
+    for(QLineEdit *field : {ui.XHLineEdit,ui.XKLineEdit,ui.XLLineEdit,
+                           ui.ZHLineEdit,ui.ZKLineEdit,ui.ZLLineEdit})
+        connect(field, &QLineEdit::textChanged, this, invalidate);
+    for(QRadioButton *button : {ui.XAxisButton,ui.ZoneButton,ui.XAxisRadioButton,
+                                ui.YAxisRadioButton,ui.ZAxisRadioButton})
+        connect(button, &QRadioButton::toggled, this, invalidate);
+    ui.XAxisButton->setChecked(true);
 	ui.ZHLineEdit->setEnabled(false);
 	ui.ZKLineEdit->setEnabled(false);
 	ui.ZLLineEdit->setEnabled(false);
 
 }
 
-void ReorientDialog::okPressed(void){
-	
-	for(int n=0;n<4;++n){
-		if(ui.DataTable->isItemSelected(ui.DataTable->item(n,0))){
-			selectedOrientation = true;
-			angleX = ui.DataTable->item(n,0)->text().toDouble() * M_PI / 180;
-			angleY = ui.DataTable->item(n,1)->text().toDouble() * M_PI / 180;
-			angleZ = ui.DataTable->item(n,2)->text().toDouble() * M_PI / 180;
-		}
-	}
-	
-	done(OKClicked);
+void ReorientDialog::okPressed() {
+    selectedOrientation = false;
+    const int row = ui.DataTable->currentRow();
+    if(!laue || !ui.okButton->isEnabled() || ui.DataTable->selectedItems().isEmpty() ||
+       !laue->reorientation.isValid(row)) return;
+    // Apply the full-precision result, not the rounded text shown in the table.
+    const double *angles = laue->reorientation.getAngles(row/2,row%2);
+    angleX=angles[0]; angleY=angles[1]; angleZ=angles[2];
+    selectedOrientation = true;
+    done(OKClicked);
 }
 
 void ReorientDialog::printPressed(void){
+    if(!ui.printButton->isEnabled()) return;
 	selectedOrientation = false;
 	done(PrintClicked);
 }
@@ -98,55 +119,65 @@ void ReorientDialog::setCrystal(Crystal* newCrystal){
 	crystal = newCrystal;
 }
 
-void ReorientDialog::go(void){
-	double h,k,l;
-	
-	h = ui.XHLineEdit->text().toDouble();
-	k = ui.XKLineEdit->text().toDouble();
-	l = ui.XLLineEdit->text().toDouble();
-	
-	setupTable();
-	
-	laue->reorientation.setUB(crystal->getUBunrotated());
-	laue->reorientation.setPrimary(h,k,l);
-	
-	if(ui.ZHLineEdit->isEnabled()){
-		double h2,k2,l2;
-		h2 = ui.ZHLineEdit->text().toDouble();
-		k2 = ui.ZKLineEdit->text().toDouble();
-		l2 = ui.ZLLineEdit->text().toDouble();
-		laue->reorientation.setSecondary(h2,k2,l2);
-		laue->reorientation.calc(Reorientation::Zone);
-	} else {
-		int mode = Reorientation::XAxis;
-		if(ui.XAxisRadioButton->isChecked()){
-			mode = Reorientation::XAxis;
-		}
-		if(ui.YAxisRadioButton->isChecked()){
-			mode = Reorientation::YAxis;
-		}
-		if(ui.ZAxisRadioButton->isChecked()){
-			mode = Reorientation::ZAxis;
-		}
-		laue->reorientation.calc(mode);
-	}
-	
-	updateTable();
-	
-	ui.okButton->setEnabled(true);
-	ui.printButton->setEnabled(true);
+void ReorientDialog::go() {
+    if(!laue || !crystal) return;
+    selectedOrientation = false;
+    resultsCurrent = false;
+    ui.okButton->setEnabled(false);
+    ui.printButton->setEnabled(false);
+    setupTable();
+    ui.DataTable->clearContents();
+    ui.DataTable->clearSelection();
+    ui.DataTable->setCurrentCell(-1,-1);
+    QLineEdit *fields[] = {ui.XHLineEdit,ui.XKLineEdit,ui.XLLineEdit,
+                          ui.ZHLineEdit,ui.ZKLineEdit,ui.ZLLineEdit};
+    double directions[6] = {};
+    const bool zone = ui.ZoneButton->isChecked();
+    for(int i=0; i<(zone ? 6 : 3); ++i) {
+        bool ok = false;
+        directions[i] = fields[i]->text().toDouble(&ok);
+        if(!ok || !std::isfinite(directions[i])) {
+            QMessageBox::warning(this, tr("Reorientation"), tr("Enter a finite number in each direction field."));
+            return;
+        }
+    }
+    laue->reorientation.setUB(crystal->getUBunrotated());
+    laue->reorientation.setPrimary(directions[0],directions[1],directions[2]);
+    int mode = ui.YAxisRadioButton->isChecked() ? Reorientation::YAxis :
+               ui.ZAxisRadioButton->isChecked() ? Reorientation::ZAxis : Reorientation::XAxis;
+    if(zone) {
+        laue->reorientation.setSecondary(directions[3],directions[4],directions[5]);
+        mode = Reorientation::Zone;
+    }
+    laue->reorientation.calc(mode);
+    const bool valid = laue->reorientation.getValidCount() > 0;
+    resultsCurrent = valid;
+    updateTable();
+    ui.printButton->setEnabled(valid);
+    if(!valid)
+        QMessageBox::warning(this, tr("Reorientation"),
+            tr("No valid rotation was found. Directions must be nonzero. Double Axis requires two perpendicular directions in reciprocal space."));
 }
 
-void ReorientDialog::updateTable(void){
-	double *angles;
-	for(int i = 0;i<4;i++){
-		for(int s = 0;s<2;s++){
-			angles = laue->reorientation.getAngles(i, s);
-			setTableItem(ui.DataTable, (i * 2) + s, 0, angles[0] * 180.0 / M_PI);
-			setTableItem(ui.DataTable, (i * 2) + s, 1, angles[1] * 180.0 / M_PI);
-			setTableItem(ui.DataTable, (i * 2) + s, 2, angles[2] * 180.0 / M_PI);
-		}	
-	}
+void ReorientDialog::updateTable() {
+    if(!resultsCurrent || !laue || ui.DataTable->rowCount() != 8) return;
+    const int selectedRow = ui.DataTable->selectedItems().isEmpty() ? -1 : ui.DataTable->currentRow();
+    QSignalBlocker blocker(ui.DataTable);
+    for(int row=0; row<8; ++row) {
+        const bool valid = laue->reorientation.isValid(row);
+        const double *angles = laue->reorientation.getAngles(row/2,row%2);
+        for(int column=0; column<3; ++column) {
+            if(valid) setTableItem(ui.DataTable,row,column,angles[column]*180/M_PI);
+            else {
+                auto item = new QTableWidgetItem(QString::fromUtf8("—"));
+                item->setFlags(Qt::NoItemFlags);
+                item->setBackground(QColor("lightgray"));
+                ui.DataTable->setItem(row,column,item);
+            }
+        }
+    }
+    if(laue->reorientation.isValid(selectedRow)) ui.DataTable->selectRow(selectedRow);
+    ui.okButton->setEnabled(laue->reorientation.isValid(selectedRow));
 }
 
 void ReorientDialog::setupTable(void){

@@ -12,7 +12,7 @@ cmd /c "`"$vs\VC\Auxiliary\Build\vcvars64.bat`" >nul && set" | ForEach-Object {
 $qt = (& qmake -query QT_INSTALL_PREFIX).Trim()
 $commit = (& git rev-parse HEAD).Trim()
 
-foreach ($project in @('QLaue', 'image_import', 'crystal_features', 'print_alignment')) {
+foreach ($project in @('QLaue', 'image_import', 'crystal_features', 'print_alignment', 'indexing', 'numerics', 'persistence', 'audit_fixes', 'image_state', 'settings_regressions', 'lattice_constraints', 'camera', 'app_controls')) {
     $build = New-Item -ItemType Directory -Force "build-$project"
     Push-Location $build
     try {
@@ -25,6 +25,15 @@ $env:QT_QPA_PLATFORM = 'windows'
 $env:QT_FORCE_STDERR_LOGGING = '1'
 & ./build-image_import/release/image-import-check.exe
 & ./build-crystal_features/release/crystal-features-check.exe
+& ./build-indexing/release/indexing-check.exe
+& ./build-numerics/release/numerics-check.exe
+& ./build-persistence/release/persistence-check.exe
+& ./build-audit_fixes/release/audit-fixes-check.exe
+& ./build-image_state/release/image-state-check.exe
+& ./build-settings_regressions/release/settings-regressions-check.exe
+& ./build-lattice_constraints/release/lattice-constraints-check.exe
+& ./build-camera/release/camera-check.exe
+& ./build-app_controls/release/app-controls-check.exe
 & ./build-print_alignment/release/print-alignment-check.exe ./build-print_alignment/output
 Remove-Item env:QT_QPA_PLATFORM
 
@@ -34,7 +43,8 @@ Copy-Item build-QLaue/release/QLaue.exe $payload
 # App-local CRT keeps installation per-user and usable without a separate download.
 Copy-Item "$env:VCToolsRedistDir/x64/Microsoft.VC143.CRT/*.dll" $payload
 Copy-Item LICENSE "$payload/LICENSE-QLaue.txt"
-Copy-Item docs/AUDIT-2026-09-24.md $payload
+$payloadDocs = New-Item -ItemType Directory -Force "$payload/docs"
+Copy-Item docs/*.md $payloadDocs
 @"
 QLaue 0.2 preview for Windows 10/11 x64
 Qt and the Visual C++ runtime are included. No Qt or Python installation is needed.
@@ -45,7 +55,10 @@ QLaue source (GPL-2.0-or-later): https://github.com/hirotsugu-tagami/QLaue/tree/
 Qt 5.15.2 source: https://download.qt.io/archive/qt/5.15/5.15.2/single/qt-everywhere-src-5.15.2.tar.xz
 Qt is dynamically linked. Its licenses and third-party notices are in licenses/.
 Visual C++ runtime: https://learn.microsoft.com/cpp/windows/redistributing-visual-cpp-files
-This preview has outstanding findings documented in AUDIT-2026-09-24.md.
+The current fixes and validation limits are documented in docs/FIXES-2026-10-26-APP-FUNCTIONS.md.
+Earlier audit reports in docs/ retain the findings as recorded at their original dates.
+Orientation solving is semi-automatic and requires manually selected reflections.
+Real camera/printer interoperability and experimental orientation accuracy need separate validation.
 The installer is not Authenticode-signed.
 "@ | Set-Content "$payload/README.txt" -Encoding utf8
 

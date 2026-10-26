@@ -27,6 +27,8 @@
 #include <QtCore>
 #include <QtXml/QtXml>
 #include <QImage>
+#include <QSaveFile>
+#include <cmath>
 #include "datafile.h"
 #include "cifreader.h"
 #include "crystal.h"
@@ -49,35 +51,79 @@ domDocument(APP_NAME) {
 													+ now.toString("ddd MMMM d yy hh:mm:ss"));
 	experimentDom.appendChild(comment);
 	
-	ox = 0; oy = 0;
+    errorLine = errorColumn = 0;
+    ox = oy = 0;
+    scale = 100;
+    lambda_min = 0.3;
+    lambda_max = 3;
+    det_thresh = 0.02;
+    det_sat = 0.45;
+    distance = 35;
 	
 }
 
-bool DataFile::write(QString filename){
-	const int IndentSize = 4;
-	
-	QFile file(filename);
-	file.open(QFile::WriteOnly | QFile::Text);
-	
-	QTextStream out(&file);
-	domDocument.save(out, IndentSize);
-	return true;
+bool DataFile::write(QString filename) {
+    errorStr.clear();
+    errorLine = errorColumn = 0;
+    DataFile checked;
+    checked.domDocument = domDocument;
+    if(!checked.parse()) {
+        errorStr = checked.errorStr;
+        return false;
+    }
+    QSaveFile file(filename);
+    if(!file.open(QIODevice::WriteOnly)) {
+        errorStr = file.errorString();
+        return false;
+    }
+    const QByteArray bytes = domDocument.toByteArray(4);
+    if(file.write(bytes) != bytes.size()) {
+        errorStr = file.errorString();
+        file.cancelWriting();
+        return false;
+    }
+    if(!file.commit()) {
+        errorStr = file.errorString();
+        return false;
+    }
+    return true;
 }
 
-bool DataFile::read(QString filename){
-	
-	QFile file(filename);
-	file.open(QFile::ReadOnly | QFile::Text);
-	
-	if (!domDocument.setContent(&file, true, &errorStr, &errorLine,
-								&errorColumn)) {
-		return false;
-	}
-	
-	parse();
-	crystal.spaceGroupGenerate();
-	
-	return true;
+QByteArray DataFile::documentState() const {
+    QDomDocument state = domDocument.cloneNode(true).toDocument();
+    QDomElement root = state.documentElement();
+    for(QDomNode node = root.firstChild(); !node.isNull();) {
+        QDomNode next = node.nextSibling();
+        if(node.isComment()) root.removeChild(node);
+        node = next;
+    }
+    return state.toByteArray(0);
+}
+
+bool DataFile::read(QString filename) {
+    errorStr.clear();
+    errorLine = errorColumn = 0;
+    QFile file(filename);
+    if(!file.open(QIODevice::ReadOnly | QIODevice::Text)) {
+        errorStr = file.errorString();
+        return false;
+    }
+    // Decode and validate a separate document; a failed load never replaces
+    // the caller's existing crystal, image or calibration.
+    DataFile candidate;
+    if(!candidate.domDocument.setContent(&file, true, &errorStr, &errorLine, &errorColumn))
+        return false;
+    if(file.error() != QFile::NoError) {
+        errorStr = file.errorString();
+        return false;
+    }
+    if(!candidate.parse()) {
+        errorStr = candidate.errorStr;
+        errorLine = candidate.errorLine;
+        return false;
+    }
+    *this = candidate;
+    return true;
 }
 
 Crystal DataFile::getCrystal(void){
@@ -88,204 +134,160 @@ void DataFile::getLaue(LaueFilm* laue){
 	laue->getLaue()->setLambdaRange(lambda_min, lambda_max);
 	laue->getLaue()->setDet(det_thresh, det_sat);
 	laue->getLaue()->setDistance(distance);
+	laue->getLaue()->setCalcPrecision(precision);
+	laue->getLaue()->setIntensityCorrection(corrections);
+	laue->getLaue()->setTubeZ(tubeZ);
+	laue->getLaue()->setIncidentPoln(polarization);
+	laue->setDisplayIntensities(intensities);
+}
+
+void DataFile::applyImageSettings(LaueFilm *film) const {
+    film->adjustImage(brightness,contrast,maximum,minimum);
+    film->setInvertImage(inverted);
+    film->setRotateImage(rotated);
+    film->setDisplayImage(imageDisplayed);
 }
 
 QImage DataFile::getLaueImage(void){
 	return laueImage;
 }
 
-void DataFile::parse(void){
-	
-	QDomNode n = domDocument.firstChild();
-    while (!n.isNull()) {
-        if (n.isElement()) {
-            QDomElement e = n.toElement();
-			if(e.tagName() == APP_NAME)
-				parseExperiment(n);
-			else
-				qDebug("DataFile::parse () : unknown token %s",qPrintable(e.tagName()));
-            break;
-        }
-        n = n.nextSibling();
+namespace {
+bool finiteNumber(const QString &text, double &value) {
+    bool ok = false;
+    value = text.toDouble(&ok);
+    return ok && std::isfinite(value);
+}
+
+bool readAttributes(const QDomElement &element, const QStringList &names, double *values) {
+    for(int i=0; i<names.size(); ++i)
+        if(!finiteNumber(element.attribute(names.at(i)), values[i])) return false;
+    return true;
+}
+
+bool optionalInteger(const QDomElement &element, const QString &name, int &value, int low, int high) {
+    if(!element.hasAttribute(name)) return true;
+    bool ok = false;
+    const int parsed = element.attribute(name).toInt(&ok);
+    if(!ok || parsed < low || parsed > high) return false;
+    value = parsed;
+    return true;
+}
+
+bool optionalBool(const QDomElement &element, const QString &name, bool &value) {
+    int parsed = value ? 1 : 0;
+    if(!optionalInteger(element,name,parsed,0,1)) return false;
+    value = parsed != 0;
+    return true;
+}
+}
+
+bool DataFile::parse() {
+    experimentDom = domDocument.documentElement();
+    auto fail = [&](const QString &message) {
+        errorStr = message;
+        return false;
+    };
+    if(experimentDom.tagName() != APP_NAME)
+        return fail("This is not a QLaue experiment file.");
+    const QDomElement structure = experimentDom.firstChildElement("crystal");
+    const QDomElement lattice = structure.firstChildElement("lattice");
+    if(structure.isNull() || lattice.isNull() ||
+       !structure.nextSiblingElement("crystal").isNull() ||
+       !lattice.nextSiblingElement("lattice").isNull())
+        return fail("The experiment needs exactly one crystal and lattice.");
+    double cell[6];
+    if(!readAttributes(lattice, {"a","b","c","alpha","beta","gamma"}, cell))
+        return fail("The lattice needs six finite numeric parameters.");
+    for(int i=3; i<6; ++i) cell[i] *= M_PI / 180;
+    if(!Crystal::isValidLattice(cell[0],cell[1],cell[2],cell[3],cell[4],cell[5]))
+        return fail("The unit cell has invalid lengths, angles or volume.");
+    crystal.setLattice(cell[0],cell[1],cell[2],cell[3],cell[4],cell[5]);
+    crystal.setName(structure.firstChildElement("description").text().toUtf8().constData());
+    const QDomElement group = structure.firstChildElement("spacegroup");
+    if(!group.isNull()) {
+        const QDomElement hall = group.firstChildElement("hall_name");
+        const QDomElement iuc = group.firstChildElement("iucname");
+        if(!hall.isNull()) {
+            if(!crystal.setSpaceGroup(hall.attribute("name").toLatin1().constData()))
+                return fail("Unknown Hall space-group name.");
+        } else if(!iuc.isNull()) {
+            if(!crystal.setSpaceGroupIUC(iuc.attribute("name").toLatin1().constData()))
+                return fail("Unknown space-group name.");
+        } else return fail("The space group has no recognized name.");
     }
-}
-
-void DataFile::parseExperiment(QDomNode n){
-	QDomNode experiment = n.firstChild();
-	while(!experiment.isNull()){
-		if(experiment.isElement()){
-			QDomElement e = experiment.toElement();
-			if(e.tagName() == "crystal"){
-				parseCrystal(experiment);
-			}
-			if(e.tagName() == "laue"){
-				parseLaue(experiment);
-			}
-		}
-		experiment = experiment.nextSibling();
-	}
-}
-
-void DataFile::parseLaueImage(QDomNode n){
-	
-	// Delete all information for the crystal
-	
-	QDomNode l = n.firstChild();
-	while(!l.isNull()){
-		if(l.isElement()){
-			QDomElement e = l.toElement();
-			if(e.tagName() == "imagedata"){
-				ox = e.attribute("ox","0").toDouble();
-				oy = e.attribute("oy","0").toDouble();
-				scale = e.attribute("scale","0").toDouble();
-				
-				QByteArray base64 = e.text().toLatin1();
-				laueImage.loadFromData(QByteArray::fromBase64(base64));
-			}
-		}
-		l = l.nextSibling();
-	}
-}
-
-void DataFile::parseLaue(QDomNode n){
-	
-	// Delete all information for the crystal
-	
-	QDomNode l = n.firstChild();
-	while(!l.isNull()){
-		if(l.isElement()){
-			QDomElement e = l.toElement();
-			if(e.tagName() == "parameters"){
-				parseParameters(l);
-			}
-			if(e.tagName() == "laue-image"){
-				parseLaueImage(l);
-			}
-		}
-		l = l.nextSibling();
-	}
-}
-
-void DataFile::parseOrientation(QDomNode n){
-	double ph = 0,pk = 0,pl = 0;
-	double sh = 0,sk = 0,sl = 0;
-	bool pflag = false;
-	bool sflag = false;
-	
-	QDomNode l = n.firstChild();
-	while(!l.isNull()){
-		if(l.isElement()){
-			QDomElement e = l.toElement();
-			if(e.tagName() == "x-axis"){
-				pflag = true;
-				ph = e.attribute("x","0").toDouble();
-				pk = e.attribute("y","0").toDouble();
-				pl = e.attribute("z","0").toDouble();
-			}
-			if(e.tagName() == "z-axis"){
-				sflag = true;
-				sh = e.attribute("x","0").toDouble();
-				sk = e.attribute("y","0").toDouble();
-				sl = e.attribute("z","0").toDouble();
-			}
-		}
-		l = l.nextSibling();
-	}
-	
-	if(pflag && sflag)
-		crystal.setU(ph,pk,pl,sh,sk,sl);
-}
-
-void DataFile::parseParameters(QDomNode n){
-	QDomNode l = n.firstChild();
-	//cerr << "DataFile::parseParameters()" << endl;
-	while(!l.isNull()){
-		if(l.isElement()){
-			QDomElement e = l.toElement();
-			if(e.tagName() == "lambda-range"){
-				lambda_min = e.attribute("min","0.3").toDouble();
-				lambda_max = e.attribute("max","3").toDouble();
-			} else if(e.tagName() == "distance") {
-				distance = e.attribute("d","35").toDouble();
-			} else if(e.tagName() == "detector") {
-				det_thresh = e.attribute("threshold","0.02").toDouble();
-				det_sat = e.attribute("saturation","0.75").toDouble();
-			}
-		}
-		l = l.nextSibling();
-	}
-}
-
-void DataFile::parseCrystal(QDomNode n){
-	// Delete all information for the crystal
-	
-	crystal.delAllAtoms();
-	
-	QDomNode c = n.firstChild();
-	while(!c.isNull()){
-		if(c.isElement()){
-			QDomElement e = c.toElement();
-			if(e.tagName() == "lattice"){
-				 crystal.setLattice(e.attribute("a","0").toDouble(),
-									e.attribute("b","0").toDouble(),
-									e.attribute("c","0").toDouble(),
-									M_PI * e.attribute("alpha","0").toDouble() / 180,
-									M_PI * e.attribute("beta","0").toDouble() / 180,
-									M_PI * e.attribute("gamma","0").toDouble() / 180);
-				parseAtoms(c);
-			} else if(e.tagName() == "spacegroup"){
-				parseSpacegroup(c);
-			} else if(e.tagName() == "description"){
-				crystal.setName(e.text().toLatin1());
-			} else if(e.tagName() == "orientation")
-				parseOrientation(c);
-		}
-		c = c.nextSibling();
-	}
-}
-
-void DataFile::parseAtoms(QDomNode n){
-	//qDebug("DataFile::parseAtoms() : parsing atom");
-	QDomNode a = n.firstChild();
-	while(!a.isNull()){
-		if(a.isElement()){
-			QDomElement e = a.toElement();
-			if(e.tagName() == "atom"){
-				//qDebug("DataFile::parseAtoms() : found atom");
-				crystal.addAtom(e.attribute("Z","0").toInt(),
-								e.attribute("a","0").toDouble(),
-								e.attribute("b","0").toDouble(),
-								e.attribute("c","0").toDouble());
-			} else {
-				QString tag = e.tagName();
-			}
-		}
-		a = a.nextSibling();
-	}
-}
-
-void DataFile::parseSpacegroup(QDomNode n){
-	//qDebug("DataFile::parseAtoms() : parsing spacegroup");
-	QDomNode sg = n.firstChild();
-	while(!sg.isNull()){
-		if(sg.isElement()){
-			QDomElement e = sg.toElement();
-			if(e.tagName() == "hall_name"){
-				QString name = e.attribute("name","");
-				//qDebug("Setting spacegroup = %s",qPrintable(name));
-				if(!name.isEmpty())
-					crystal.setSpaceGroup((const char*)name.toLatin1());
-			}
-			if(e.tagName() == "iucname"){
-				QString name = e.attribute("name","");
-				if(!name.isEmpty()){
-					//qDebug("Setting spacegroup = %s",qPrintable(name));
-					crystal.setSpaceGroupIUC((const char*)name.toLatin1());
-				}
-			}
-		}
-		sg = sg.nextSibling();
-	}
+    crystal.delAllAtoms();
+    for(QDomElement atom=lattice.firstChildElement("atom"); !atom.isNull();
+        atom=atom.nextSiblingElement("atom")) {
+        double position[3];
+        bool ok = false;
+        const int z = atom.attribute("Z").toInt(&ok);
+        if(!ok || !readAttributes(atom, {"a","b","c"}, position) ||
+           !crystal.addAtom(z,position[0],position[1],position[2]))
+            return fail("Invalid atom number, fractional coordinates or atom count.");
+    }
+    if(!crystal.spaceGroupGenerate())
+        return fail("The symmetry-expanded structure exceeds QLaue's atom limit.");
+    const QDomElement orientation = structure.firstChildElement("orientation");
+    if(!orientation.isNull()) {
+        double x[3], z[3];
+        if(!readAttributes(orientation.firstChildElement("x-axis"), {"x","y","z"}, x) ||
+           !readAttributes(orientation.firstChildElement("z-axis"), {"x","y","z"}, z) ||
+           !crystal.setU(x[0],x[1],x[2],z[0],z[1],z[2]))
+            return fail("The orientation needs two finite, nonzero, independent directions.");
+    }
+    // Older crystal-only files omit Laue parameters. Keep defined defaults for
+    // missing optional elements, but reject invalid values that are present.
+    const QDomElement laue = experimentDom.firstChildElement("laue");
+    if(!laue.nextSiblingElement("laue").isNull())
+        return fail("The experiment has more than one Laue configuration.");
+    const QDomElement parameters = laue.firstChildElement("parameters");
+    if(!optionalInteger(parameters,"precision",precision,1,11) ||
+       !optionalInteger(parameters,"corrections",corrections,0,1023) ||
+       !optionalInteger(parameters,"tube-Z",tubeZ,1,92) ||
+       !optionalInteger(parameters,"polarization",polarization,1,3) ||
+       !optionalBool(parameters,"intensities",intensities))
+        return fail("Invalid diffraction calculation settings.");
+    QDomElement parameter = parameters.firstChildElement("lambda-range");
+    if(!parameter.isNull()) {
+        double range[2];
+        if(!readAttributes(parameter, {"min","max"}, range) ||
+           range[0] <= 0 || range[1] < range[0] || !std::isfinite(1/range[0]) ||
+           1/range[1] <= 0)
+            return fail("The wavelength range must have 0 < min <= max and a finite wave vector.");
+        lambda_min=range[0]; lambda_max=range[1];
+    }
+    parameter = parameters.firstChildElement("distance");
+    if(!parameter.isNull() &&
+       (!finiteNumber(parameter.attribute("d"),distance) || distance <= 0))
+        return fail("The sample-detector distance must be positive.");
+    parameter = parameters.firstChildElement("detector");
+    if(!parameter.isNull()) {
+        double detector[2];
+        if(!readAttributes(parameter, {"threshold","saturation"}, detector) ||
+           detector[0] < 0 || detector[0] > 1 || detector[1] < 0 || detector[1] > 1)
+            return fail("Detector threshold and saturation must each be between 0 and 1.");
+        det_thresh=detector[0]; det_sat=detector[1];
+    }
+    const QDomElement image = laue.firstChildElement("laue-image");
+    if(!image.isNull()) {
+        const QDomElement data = image.firstChildElement("imagedata");
+        if(!optionalInteger(data,"brightness",brightness,-100,100) ||
+           !optionalInteger(data,"contrast",contrast,0,100) ||
+           !optionalInteger(data,"maximum",maximum,0,255) ||
+           !optionalInteger(data,"minimum",minimum,0,255) ||
+           !optionalBool(data,"inverted",inverted) ||
+           !optionalBool(data,"rotated",rotated) ||
+           !optionalBool(data,"displayed",imageDisplayed))
+            return fail("Invalid image adjustment settings.");
+        double geometry[3];
+        if(!readAttributes(data, {"ox","oy","scale"}, geometry) || geometry[2] <= 0)
+            return fail("The image needs finite origins and a positive scale.");
+        if(!laueImage.loadFromData(QByteArray::fromBase64(data.text().toLatin1())))
+            return fail("The experiment contains an unreadable image.");
+        ox=geometry[0]; oy=geometry[1]; scale=geometry[2];
+    }
+    return true;
 }
 
 void DataFile::setCrystal(Crystal *crystal){
@@ -342,6 +344,11 @@ void DataFile::setLaue(LaueFilm *film){
 	experimentDom.appendChild(l);
 	
 	QDomElement parameters = domDocument.createElement("parameters");
+	parameters.setAttribute("precision",film->getLaue()->calcPrecision());
+	parameters.setAttribute("corrections",film->getLaue()->intensityCorrection());
+	parameters.setAttribute("tube-Z",film->getLaue()->tubeZ());
+	parameters.setAttribute("polarization",film->getLaue()->incidentPoln());
+	parameters.setAttribute("intensities",film->getDisplayIntensities() ? 1 : 0);
 	
 	QDomElement d = domDocument.createElement("distance"); 
 	d.setAttribute("d", film->getLaue()->getDistance());
@@ -371,6 +378,13 @@ void DataFile::setLaue(LaueFilm *film){
 		experimentDom.appendChild(l);
 		
 		QDomElement imagedata = domDocument.createElement("imagedata");
+		imagedata.setAttribute("brightness",film->imageBrightness());
+		imagedata.setAttribute("contrast",film->imageContrast());
+		imagedata.setAttribute("maximum",film->imageMaximum());
+		imagedata.setAttribute("minimum",film->imageMinimum());
+		imagedata.setAttribute("inverted",film->isImageInverted() ? 1 : 0);
+		imagedata.setAttribute("rotated",film->isImageRotated() ? 1 : 0);
+		imagedata.setAttribute("displayed",film->isImageDisplayed() ? 1 : 0);
 		
 		imagedata.setAttribute("ox",film->originX());
 		imagedata.setAttribute("oy",film->originY());
@@ -422,48 +436,72 @@ bool DataFile::readCif(QString filename){
 	return readCifFile(filename, crystal, errorStr, errorLine);
 }
 
-bool DataFile::readCel(QString filename){
-	
-	QFile file(filename);
-	file.open(QFile::ReadOnly | QFile::Text);
-	
-	double a = 0,b = 0,c = 0;
-	double alpha = 0,beta = 0,gamma = 0;
-	
-	while (!file.atEnd()) {
-		QByteArray line = file.readLine();
-		QStringList list = QString(line).split(QRegExp("\\s+"),QString::SkipEmptyParts);
-		
-		if(!list.isEmpty()){
-			if(list.at(0) == "CELL"){
-				a = list.at(1).toDouble();
-				b = list.at(2).toDouble();
-				c = list.at(3).toDouble();
-				alpha = list.at(4).toDouble();
-				beta = list.at(5).toDouble();
-				gamma = list.at(6).toDouble();
-			} else if (list.at(0) == "natom") {
-				crystal.delAllAtoms();
-				
-				for(int a=0; a< list.at(1).toInt() ; ++a){
-					QByteArray line = file.readLine();
-					QStringList list = QString(line).split(QRegExp("\\s+"),QString::SkipEmptyParts);
-					crystal.addAtom(list.at(1).toInt(),
-									list.at(2).toDouble(),
-									list.at(3).toDouble(),
-									list.at(4).toDouble());
-					
-				}
-			} else if (list.at(0) == "rgnr") {
-				// Spacegroup
-				crystal.setSpaceGroupNum(list.at(1).toInt());
-			} else {
-				qDebug("DataFile::readCel() : unknown token %s",qPrintable(list.at(0)));
-			}
-		}
-	}
-	
-	crystal.setLattice(a,b,c,M_PI * alpha / 180,M_PI * beta / 180,M_PI * gamma / 180);
-	crystal.spaceGroupGenerate();
-	return true;
+bool DataFile::readCel(QString filename) {
+    errorStr.clear();
+    errorLine = errorColumn = 0;
+    QFile file(filename);
+    if(!file.open(QIODevice::ReadOnly | QIODevice::Text)) {
+        errorStr = file.errorString();
+        return false;
+    }
+    Crystal candidate;
+    double cell[6] = {};
+    bool haveCell=false, haveAtoms=false, haveGroup=false;
+    int lineNumber=0;
+    auto fail = [&](const QString &message) {
+        errorStr = message;
+        errorLine = lineNumber;
+        return false;
+    };
+    auto fields = [&]() {
+        ++lineNumber;
+        return QString::fromUtf8(file.readLine()).split(QRegExp("\\s+"),Qt::SkipEmptyParts);
+    };
+    while(!file.atEnd()) {
+        const QStringList list = fields();
+        if(list.isEmpty() || list.first().startsWith('#')) continue;
+        const QString token = list.first();
+        if(token == "CELL") {
+            if(haveCell || list.size() != 7) return fail("CELL requires six lattice parameters.");
+            for(int i=0; i<6; ++i)
+                if(!finiteNumber(list.at(i+1),cell[i])) return fail("Invalid CELL parameter.");
+            for(int i=3; i<6; ++i) cell[i] *= M_PI / 180;
+            if(!Crystal::isValidLattice(cell[0],cell[1],cell[2],cell[3],cell[4],cell[5]))
+                return fail("The unit cell has invalid lengths, angles or volume.");
+            haveCell=true;
+        } else if(token == "natom") {
+            bool ok=false;
+            const int count = list.size()==2 ? list.at(1).toInt(&ok) : -1;
+            if(haveAtoms || !ok || count < 0 || count > Crystal::MaxAtoms)
+                return fail("Invalid natom count (supported range: 0 to 2048).");
+            candidate.delAllAtoms();
+            for(int i=0; i<count; ++i) {
+                if(file.atEnd()) return fail("The atom table ended before all atoms were read.");
+                const QStringList atom = fields();
+                if(atom.size() < 5) return fail("Each atom requires a label, atomic number and x, y, z.");
+                const int z = atom.at(1).toInt(&ok);
+                double xyz[3];
+                if(!ok) return fail("Invalid atomic number.");
+                for(int c=0; c<3; ++c)
+                    if(!finiteNumber(atom.at(c+2),xyz[c])) return fail("Invalid atom coordinate.");
+                if(!candidate.addAtom(z,xyz[0],xyz[1],xyz[2]))
+                    return fail("Invalid atom number, fractional coordinates or atom count.");
+            }
+            haveAtoms=true;
+        } else if(token == "rgnr") {
+            bool ok=false;
+            const int group = list.size()==2 ? list.at(1).toInt(&ok) : 0;
+            if(haveGroup || !ok || !candidate.setSpaceGroupNum(group))
+                return fail("Invalid space-group number.");
+            haveGroup=true;
+        }
+        // CEL producers may add metadata directives not used by QLaue.
+    }
+    if(file.error() != QFile::NoError) return fail(file.errorString());
+    if(!haveCell || !haveAtoms) return fail("CEL requires CELL and natom records.");
+    candidate.setLattice(cell[0],cell[1],cell[2],cell[3],cell[4],cell[5]);
+    if(!candidate.spaceGroupGenerate())
+        return fail("The symmetry-expanded structure exceeds QLaue's atom limit.");
+    crystal = candidate;
+    return true;
 }

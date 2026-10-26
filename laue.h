@@ -31,6 +31,10 @@
 #include "atom.h"
 #include "crystal.h"
 #include "xray.h"
+#include <QPointF>
+#include <QString>
+#include <QVector>
+#include <functional>
 
 // Class for possible orientations
 
@@ -61,6 +65,13 @@ public:
 
 bool operator<(const LaueOrientations& a, const LaueOrientations& b);
 
+struct LaueIndexingResult {
+	QVector<LaueOrientations> orientations;
+	QString error;
+	bool canceled = false;
+	bool truncated = false;
+};
+
 class Reorientation {
 private:
 	double angles[8][3];
@@ -68,6 +79,7 @@ private:
 	Matrix secondary;
 	Matrix UB;
 	int mode;
+	bool valid[8];
 public:
 	// Constructors
 		
@@ -83,6 +95,8 @@ public:
 	Matrix getPrimary(void);
 	Matrix getSecondary(void);
 	int getMode(void);
+	bool isValid(int row) const { return row >= 0 && row < 8 && valid[row]; }
+	int getValidCount() const;
 	
 	// Set parameters
 	
@@ -153,7 +167,7 @@ private:
 	int calc_precision;
 	bool calc_intensities;
 	int tube_z;
-	LaueSpot *spot;
+	QVector<LaueSpot> spot;
 	int indexingMaxH;
 	int indexingMaxK;
 	int indexingMaxL;
@@ -196,13 +210,15 @@ public:
 	void setLambdaRange(double min, double max);
 	double getLambdaRangeMax(void);
 	double getLambdaRangeMin(void);
-	bool calc(Crystal *crystal, bool* abort = 0, int *spotcount = 0);
-	bool calcHKL(Crystal *crystal, LaueSpot *spot, int h, int k, int l);
+	// Reports percent complete; return true from progress to cancel.
+	bool calc(Crystal *crystal, const std::function<bool(int)> &progress = {});
+	void copySpotsFrom(const lauegram &other);
+	bool calcHKL(Crystal *crystal, LaueSpot *spot, int h, int k, int l, bool positionsOnly = false);
 	void calcInten(double minx, double maxx, double miny, double maxy);
 	
 	double getDistance(void);
 	int getNspots(void);
-	void setNspots(int n)				{ nspots = n; }
+	void setNspots(int n) { spot.resize(qMax(0,n)); nspots = spot.size(); }
 	double maxSpotInten(void);
 	double maxSpotInten(double minx, double maxx, double miny, double maxy);
 	
@@ -227,7 +243,10 @@ public:
 	
 	// Indexing routines
 	
-	int indexLaue(Crystal *crystal, int numIndexSpots, double indexSpots[100][2], int *nOrientations, LaueOrientations *orientations);
+	enum { MaxIndexingSpots = 100, MaxIndexingRange = 20, MaxIndexingResults = 1000 };
+	// The callback reports percent complete and returns true to cancel.
+	LaueIndexingResult indexLaue(const Crystal &crystal, const QVector<QPointF> &points,
+			const std::function<bool(int)> &progress = {});
 		
 	// operators
 	

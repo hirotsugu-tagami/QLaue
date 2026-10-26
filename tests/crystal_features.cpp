@@ -396,9 +396,6 @@ static void checkRotation() {
             for(int i=0;i<3;++i) for(int j=0;j<3;++j) requireNear(u.Get(i,j),i==j?1:0,"Inverse clicks did not restore orientation");
         }
     }
-    // These legacy workers have no QObject parent; stop them before the widgets go away.
-    delete film->getLaue();
-    delete film->getIndexing();
     qInfo() << "PASS: X/Y/Z positive and negative repeated clicks in both rotation modes";
 }
 

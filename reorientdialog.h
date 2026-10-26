@@ -55,6 +55,7 @@ private:
 	lauegram* laue;
 	Crystal* crystal;
 	bool selectedOrientation;
+    bool resultsCurrent = false;
 	double angleX, angleY, angleZ;
 	
 	void setupTable(void);

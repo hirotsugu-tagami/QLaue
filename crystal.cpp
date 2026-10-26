@@ -291,9 +291,9 @@ Atom * Crystal::getAtom(int i){
 
 Matrix Crystal::getAtom4(int i){
 	Matrix pos(4,1);
-	pos.Set(0,0,atoms[i].getXPos());
-	pos.Set(1,0,atoms[i].getYPos());
-	pos.Set(2,0,atoms[i].getZPos());
+	pos.Set(0,0,atoms[i].getXPos() - std::floor(atoms[i].getXPos()));
+	pos.Set(1,0,atoms[i].getYPos() - std::floor(atoms[i].getYPos()));
+	pos.Set(2,0,atoms[i].getZPos() - std::floor(atoms[i].getZPos()));
 	pos.Set(3,0,1.0);
 	return pos;
 }
@@ -353,83 +353,59 @@ void Crystal::setU(const Matrix newU){
 	calcUB();
 }
 
-void Crystal::setU(double h1, double k1, double l1,
-				   double h2, double k2, double l2){
-
-	// Set the orientation matrix like a UB
-	// h1,k1,l1 make the primary (x) direction while
-	// h2,k2,l2 make the secondary (z) direction
-	
-	Matrix Primary(h1,k1,l1);
-	Matrix Secondary(h2,k2,l2);
-	setU(Primary,Secondary);
+namespace {
+bool normalizeDirection(Matrix &v) {
+    if(v.Rows() != 3 || v.Cols() != 1) return false;
+    double scale = 0;
+    for(int i=0;i<3;++i) {
+        if(!std::isfinite(v.Get(i,0))) return false;
+        scale = std::max(scale, std::abs(v.Get(i,0)));
+    }
+    if(scale == 0) return false;
+    v = v / scale;
+    v = v / v.mag();
+    return true;
 }
-	
-void Crystal::setU(Matrix Primary, Matrix Secondary){
-	
-	Matrix X_hat(3,1), Z_hat(3,1), Y_hat(3,1);
-	
-	// Convert into crystal cartezian
-	
-	Primary = B * Primary;
-	Secondary = B * Secondary;
-	
-	X_hat = Primary * (1.0 / Primary.mag());
-	Z_hat = Secondary * (1.0 / Secondary.mag());
-	
-	Y_hat = Z_hat ^ X_hat;
-	Z_hat = X_hat ^ Y_hat;
-	
-	Matrix newU(3,3);
-	
-	for(int i = 0; i < 3 ; i++){
-		newU.Set(0,i,X_hat.Get(i,0));
-		newU.Set(1,i,Y_hat.Get(i,0));
-		newU.Set(2,i,Z_hat.Get(i,0));
-	}
-	
-	setU(newU);
-}	
+bool orientationFrame(Matrix first, Matrix second, Matrix &frame) {
+    if(!normalizeDirection(first) || !normalizeDirection(second)) return false;
+    Matrix third = first ^ second;
+    if(third.mag() < 1e-10 || !normalizeDirection(third)) return false;
+    second = third ^ first;
+    for(int i=0;i<3;++i) {
+        frame.Set(i,0,first.Get(i,0));
+        frame.Set(i,1,second.Get(i,0));
+        frame.Set(i,2,third.Get(i,0));
+    }
+    return true;
+}
+double periodic(double value) { return value - std::floor(value); }
+Atom periodicAtom(Atom atom) {
+    atom.setPos(periodic(atom.getXPos()),periodic(atom.getYPos()),periodic(atom.getZPos()));
+    return atom;
+}
+}
 
-void Crystal::setU(Matrix Primary, Matrix Secondary, Matrix PrimaryHKL, Matrix SecondaryHKL){
-	Matrix Tc(3,3), Td(3,3), newU(3,3);
-	Matrix Tc2(3,1), Tc3(3,1);
-	Matrix Td2(3,1), Td3(3,1);
-	
-	Matrix vec1 = PrimaryHKL;
-	Matrix vec2 = SecondaryHKL;
-	
-	vec1 = getB() * vec1;
-	vec1 = vec1 / vec1.mag();
-	vec2 = getB() * vec2;
-	vec2 = vec2 / vec2.mag();
-	
-	Tc3 = vec1 ^ vec2;
-	Tc3 = Tc3 / Tc3.mag();
-	Tc2 = Tc3 ^ vec1;
-	Tc2 = Tc2 / Tc2.mag();
-	
-	Primary = Primary / Primary.mag();
-	Secondary = Secondary / Secondary.mag();
-	
-	Td3 = Primary ^ Secondary;
-	Td3 = Td3 / Td3.mag();
-	Td2 = Td3 ^ Primary;
-	Td2 = Td2 / Td2.mag();
-	
-	for(int i = 0 ; i < 3 ; i++ ){
-		// Load up the matricies Tc and Td;
-		Tc.Set(i,0,vec1.Get(i,0));
-		Tc.Set(i,1,Tc2.Get(i,0));
-		Tc.Set(i,2,Tc3.Get(i,0));
-		
-		Td.Set(i,0,Primary.Get(i,0));
-		Td.Set(i,1,Td2.Get(i,0));
-		Td.Set(i,2,Td3.Get(i,0));
-	}
-	
-	newU = Td * Tc.transpose();
-	setU(newU);
+bool Crystal::setU(double h1, double k1, double l1, double h2, double k2, double l2) {
+    return setU(Matrix(h1,k1,l1),Matrix(h2,k2,l2));
+}
+
+bool Crystal::setU(Matrix Primary, Matrix Secondary) {
+    // Normalize before transforming as well, to avoid overflowing B * extreme input.
+    if(!normalizeDirection(Primary) || !normalizeDirection(Secondary)) return false;
+    Matrix frame(3,3);
+    if(!orientationFrame(B*Primary, B*Secondary, frame)) return false;
+    Matrix target(1,0,0, 0,0,-1, 0,1,0);
+    setU(target * frame.transpose());
+    return true;
+}
+
+bool Crystal::setU(Matrix Primary, Matrix Secondary, Matrix PrimaryHKL, Matrix SecondaryHKL) {
+    if(!normalizeDirection(PrimaryHKL) || !normalizeDirection(SecondaryHKL)) return false;
+    Matrix crystalFrame(3,3), detectorFrame(3,3);
+    if(!orientationFrame(B*PrimaryHKL,B*SecondaryHKL,crystalFrame) ||
+       !orientationFrame(Primary,Secondary,detectorFrame)) return false;
+    setU(detectorFrame * crystalFrame.transpose());
+    return true;
 }
 
 Matrix Crystal::toQ(double x, double y, double z){
@@ -444,11 +420,15 @@ Matrix Crystal::toQ(double x, double y, double z){
 	return Q;
 }
 
-void Crystal::addAtom(int zn, double x, double y, double z) {
+bool Crystal::addAtom(int zn, double x, double y, double z) {
+	if(natoms >= MaxAtoms || zn < 1 || zn > 98 ||
+	   !std::isfinite(x) || !std::isfinite(y) || !std::isfinite(z)) return false;
+	natoms_sggen = 0;
 	atoms[natoms].setPos(x,y,z);
 	atoms[natoms].setZ(zn);
 	atoms[natoms].setRootAtom(-1);
 	natoms++;
+	return true;
 }
 
 complex<double> Crystal::calcXSFactor(int h, int k, int l, double sinthoverlambda, 
@@ -465,8 +445,8 @@ complex<double> Crystal::calcXSFactor(double h, double k, double l, double sinth
 		double f0 = XRay::getXf0(atoms[i].getZ(), sinthoverlambda);
 		double f0_0 = XRay::getXf0(atoms[i].getZ(), 0);
 		//cerr << f0_0 << endl;
-		sfactor = sfactor + (atoms[i].getPhase(h,k,l) * (f1f2 + f0 - f0_0));
-		//sfactor = sfactor + (atoms[i].getPhase(h,k,l) * f0_0);
+		sfactor = sfactor + (periodicAtom(atoms[i]).getPhase(h,k,l) * (f1f2 + f0 - f0_0));
+		//sfactor = sfactor + (periodicAtom(atoms[i]).getPhase(h,k,l) * f0_0);
 	}
 	//cerr << "(" << h << " " << k << " " << l <<") sfactor = " << sfactor << endl; 
 	return sfactor;
@@ -476,7 +456,7 @@ bool Crystal::isForbidden(double h, double k, double l){
 	complex<double> sfactor(0,0);
 	for(int i=0;i<(natoms + natoms_sggen);i++){
 		double f0_0 = XRay::getXf0(atoms[i].getZ(), 0);
-		sfactor = sfactor + (atoms[i].getPhase(h,k,l) * f0_0);
+		sfactor = sfactor + (periodicAtom(atoms[i]).getPhase(h,k,l) * f0_0);
 	}
 	
 	double inten = (sfactor * conj(sfactor)).real();
@@ -626,96 +606,73 @@ spacegroup* Crystal::getSpaceGroup(void){
 	return sg;
 }
 
-bool Crystal::setSpaceGroupNum(const int sgnum){
-	sg = &spacegroups[0];
-	for(int n=0; sg->Name != NULL; n++){
-		if(sg->number == sgnum)
-			return true;
-		sg = &spacegroups[n];
-	}
-	return false;
+bool Crystal::setSpaceGroupNum(const int sgnum) {
+    for(spacegroup *candidate=spacegroups; candidate->Name; ++candidate)
+        if(candidate->number==sgnum) { sg=candidate; return true; }
+    return false;
 }
 
-void Crystal::setSpaceGroup(const int sgnum){
-	sg = &spacegroups[sgnum];
+void Crystal::setSpaceGroup(const int sgnum) {
+    if(sgnum < 0) return;
+    for(int i=0;spacegroups[i].Name;++i)
+        if(i==sgnum) { sg=&spacegroups[i]; return; }
 }
 
-bool Crystal::setSpaceGroup(const char *name){
-	int n = 0;
-	for(sg = spacegroups; sg->Name != NULL; ++sg){
-		if(!strcmp(name, sg->HallName)){
-			return true;
-		}
-		n++;
-	}
-	return false;	
+bool Crystal::setSpaceGroup(const char *name) {
+    if(!name) return false;
+    for(spacegroup *candidate=spacegroups; candidate->Name; ++candidate)
+        if(!strcmp(name,candidate->HallName)) { sg=candidate; return true; }
+    return false;
 }
 
-bool Crystal::setSpaceGroupIUC(const char *iucname){
-	int n = 0;
-	for(sg = spacegroups; sg->Name != NULL; ++sg){
-		if(!strcmp(iucname, sg->Name)){
-			return true;
-		}
-		n++;
-	}
-	return false;	
+bool Crystal::setSpaceGroupIUC(const char *name) {
+    if(!name) return false;
+    for(spacegroup *candidate=spacegroups; candidate->Name; ++candidate)
+        if(!strcmp(name,candidate->Name)) { sg=candidate; return true; }
+    return false;
 }
 
-void Crystal::spaceGroupGenerate(void){
-	sgTransform();
+bool Crystal::spaceGroupGenerate(void) {
+    natoms_sggen = 0;
+    if(!sg || !sg->Name || sg->ngenerators < 0 || sg->ngenerators > 192) return false;
+    for(int i=0;i<natoms;++i) {
+        if(atoms[i].getZ() < 1 || atoms[i].getZ() > 98 ||
+           !std::isfinite(atoms[i].getXPos()) || !std::isfinite(atoms[i].getYPos()) ||
+           !std::isfinite(atoms[i].getZPos())) return false;
+    }
+    if(sgTransform()) return true;
+    natoms_sggen = 0;
+    return false;
 }
 
-void Crystal::sgTransform(void){
-	// Cycle over all atoms
-	Matrix newpos(3,1);
-	Matrix atompos(4,1);
-	Matrix op(3,4);
-	
-	bool flag = true;
-	while(flag == true){
-		flag = false;
-		//cerr << "Cycling over " << sg->ngenerators << " generators" << endl;
-		for(int n=0;n<sg->ngenerators;n++){
-			for(int a=0; a<(natoms) ; a++){
-				atompos = getAtom4(a);
-				op = getGenerator(sg,n);
-				//cerr << "Operator " << n << endl;
-				//cerr << op;
-				newpos = op * atompos;
-				if(sgInsertAtom(atoms[a], newpos)){
-					atoms[natoms + natoms_sggen - 1].setRootAtom(a);
-					//cerr << "Crystal::sgTransform() : *** Inserted atom ***" << endl;
-					flag = true;
-				}
-			}
-		}
-	}
-	
-	// Now apply centering 
-	
-	//cerr << "crystal::sgGenerate() : Lattice type = " << sg->LatticeType << endl;
-	
-	switch(sg->LatticeType) {
-		case 'P': break;
-		case 'I': sgBodyCenter(); break;
-		case 'F': sgFaceCenter(); break;
-		case 'A': sgACenter(); break;
-		case 'B': sgBCenter(); break;
-		case 'C': sgCCenter(); break;
-		case 'R': sgRhomb(); break;
-		default :
-			cerr << "crystal::sgGenerate() : Unknown lattice centering" << endl;
-			return;
-			break;
-	} 
+bool Crystal::sgTransform(void) {
+    for(int n=0;n<sg->ngenerators;++n) {
+        const Matrix op = getGenerator(sg,n);
+        for(int a=0;a<natoms;++a) {
+            const int inserted = sgInsertAtom(atoms[a],op * getAtom4(a));
+            if(inserted < 0) return false;
+            if(inserted > 0) atoms[natoms + natoms_sggen - 1].setRootAtom(a);
+        }
+    }
+    switch(sg->LatticeType) {
+        case 'P': return true;
+        case 'I': return sgBodyCenter();
+        case 'F': return sgFaceCenter();
+        case 'A': return sgACenter();
+        case 'B': return sgBCenter();
+        case 'C': return sgCCenter();
+        case 'R': return sgRhomb();
+        default: return false;
+    }
 }
 
-bool Crystal::sgInsertAtom(const Atom a, const Matrix pos){
+int Crystal::sgInsertAtom(Atom a, const Matrix pos){
 	// Keep source coordinates as entered; wrap only generated equivalents.
 	Matrix newpos(pos);
-	for(int i=0;i<3;i++)
-		newpos.Set(i,0,newpos.Get(i,0) - std::floor(newpos.Get(i,0)));
+	for(int i=0;i<3;i++) {
+		if(!std::isfinite(newpos.Get(i,0))) return -1;
+		newpos.Set(i,0,periodic(newpos.Get(i,0)));
+	}
 	
 	// Is there an atom already in this place ?
 	// Define an accuracy based on the lattice parameter
@@ -726,9 +683,9 @@ bool Crystal::sgInsertAtom(const Atom a, const Matrix pos){
 	
 	for(int n=0;n<(natoms + natoms_sggen);++n){
 		// Positions separated by integer cell translations describe the same site.
-		double dx = newpos.Get(0,0) - atoms[n].getXPos();
-		double dy = newpos.Get(1,0) - atoms[n].getYPos();
-		double dz = newpos.Get(2,0) - atoms[n].getZPos();
+		double dx = newpos.Get(0,0) - periodic(atoms[n].getXPos());
+		double dy = newpos.Get(1,0) - periodic(atoms[n].getYPos());
+		double dz = newpos.Get(2,0) - periodic(atoms[n].getZPos());
 		if((std::abs(dx - std::round(dx)) < xacc) &&
 		   (std::abs(dy - std::round(dy)) < yacc) &&
 		   (std::abs(dz - std::round(dz)) < zacc)) {
@@ -739,53 +696,53 @@ bool Crystal::sgInsertAtom(const Atom a, const Matrix pos){
 	
 	// Ok so we can insert an atom in this location
 	
+	if(natoms + natoms_sggen >= MaxAtoms || a.getZ() < 1 || a.getZ() > 98) return -1;
 	atoms[natoms + natoms_sggen] = a;
 	atoms[natoms + natoms_sggen].setPos(newpos);
 	natoms_sggen++;
 	return true;
 }
 
-void Crystal::sgFaceCenter(void){
+bool Crystal::sgFaceCenter(void){
 	Matrix v1(0.5, 0.5, 0);
 	Matrix v2(0, 0.5, 0.5);
 	Matrix v3(0.5, 0, 0.5);
-	sgApplyCenter(v1);
-	sgApplyCenter(v2);
-	sgApplyCenter(v3);
+	return sgApplyCenter(v1) && sgApplyCenter(v2) && sgApplyCenter(v3);
 }
 
-void Crystal::sgBodyCenter(void){
+bool Crystal::sgBodyCenter(void){
 	Matrix v(0.5, 0.5, 0.5);
-	sgApplyCenter(v);
+	return sgApplyCenter(v);
 }
 
-void Crystal::sgACenter(void){
+bool Crystal::sgACenter(void){
 	Matrix v(0, 0.5, 0.5);
-	sgApplyCenter(v);
+	return sgApplyCenter(v);
 }
 
-void Crystal::sgBCenter(void){
+bool Crystal::sgBCenter(void){
 	Matrix v(0.5, 0, 0.5);
-	sgApplyCenter(v);
+	return sgApplyCenter(v);
 }
 
-void Crystal::sgCCenter(void){
+bool Crystal::sgCCenter(void){
 	Matrix v(0.5, 0.5, 0);
-	sgApplyCenter(v);
+	return sgApplyCenter(v);
 }
 
-void Crystal::sgRhomb(void){
+bool Crystal::sgRhomb(void){
 	Matrix v1(2.0/3.0, 1.0/3.0,1.0/3.0);
 	Matrix v2(1.0/3.0, 2.0/3.0,2.0/3.0);
-	sgApplyCenter(v1);
-	sgApplyCenter(v2);
+	return sgApplyCenter(v1) && sgApplyCenter(v2);
 }
 
-void Crystal::sgApplyCenter(Matrix v){
+bool Crystal::sgApplyCenter(Matrix v){
 	int max = (natoms + natoms_sggen);
 	for(int n=0;n<max;n++){
-		sgInsertAtom(atoms[n],atoms[n].getPos() + v); 
-	}	
+		Atom source = periodicAtom(atoms[n]);
+		if(sgInsertAtom(source,Matrix(source.getXPos(),source.getYPos(),source.getZPos()) + v) < 0) return false;
+	}
+	return true;
 }
 
 // ***************************************************************************************

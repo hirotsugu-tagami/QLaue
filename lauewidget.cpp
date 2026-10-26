@@ -29,6 +29,7 @@
 #include <QtWidgets>
 #include <QScopedValueRollback>
 #include <algorithm>
+#include <cmath>
 
 #include "matrix.h"
 #include "version.h"
@@ -43,304 +44,89 @@
 
 #ifdef CALC_IN_THREAD
 
-LaueIndexingThread::LaueIndexingThread(QObject *parent) :
-QThread(parent), lauegram()
-{
-	restart = false;
-	abort = false;
-	
-	// Now initialise the arrays for indexing spots
-	
-	orientations = new LaueOrientations[6500];
-	indexSpotsX = new double[100];
-	indexSpotsY = new double[100];
-	
-	nOrientations = 0;
-	niterations = 0;
-}
+LaueIndexingThread::LaueIndexingThread(QObject *parent) : QThread(parent), lauegram() {}
 
 LaueIndexingThread::~LaueIndexingThread() {
-	mutex.lock();
-	abort = true;
-	condition.wakeOne();
-	mutex.unlock();
-	
-	wait();
-	
-	delete [] indexSpotsX;
-	delete [] indexSpotsY;
-	delete [] orientations;
+    requestInterruption();
+    wait();
 }
 
-int LaueIndexingThread::getMaxIterations(void) {
-
-		int maxIterations = (getIndexingMaxH() * 2) + 1;
-		maxIterations = maxIterations * ((getIndexingMaxH() * 2) + 1);
-		maxIterations = maxIterations * ((getIndexingMaxH() * 2) + 1);
-		maxIterations = maxIterations * maxIterations;
-		return maxIterations;
-}
-
-void LaueIndexingThread::indexLaue(Crystal *crystal, 
-								   int numIndexSpots, double *indexSpotsX, double *indexSpotsY){
-								   
-	QMutexLocker locker(&mutex);
-	
-	newOrient = *crystal;
-	
-	this->numIndexSpots = numIndexSpots;
-	for(int i = 0 ; i < numIndexSpots ; i++){
-		this->indexSpotsX[i] = indexSpotsX[i];
-		this->indexSpotsY[i] = indexSpotsY[i];
-	}
-	
-	this->nOrientations = nOrientations;
-	this->orientations = orientations;
-	
-	if(!isRunning()) {
-		start(LowPriority);
-	} else {
-		restart = true;
-		condition.wakeOne();
-	}
+bool LaueIndexingThread::indexLaue(const Crystal &crystal, const QVector<QPointF> &points) {
+    if(isRunning()) return false;
+    wait();
+    newOrient = crystal;
+    indexSpots = points;
+    indexingResult = LaueIndexingResult();
+    start(LowPriority);
+    return true;
 }
 
 void LaueIndexingThread::run() {
-	forever {
-		
-		nOrientations = 0;
-		emit calcStarted();
-		
-		Matrix primary(getDistance(),-1.0 * indexSpotsX[0], indexSpotsY[0]);
-		Matrix secondary(getDistance(), -1.0 * indexSpotsX[1] , indexSpotsY[1]);
-		Matrix k_in(1,0,0);
-		
-		primary = k_in + (primary / primary.mag());
-		secondary = k_in + (secondary / secondary.mag());
-		
-		double theta = cos(primary.dot(secondary) / (primary.mag() * secondary.mag()));
-		
-		newOrient.setFreeRotate(true);
-		
-		setCalcIntensities(false);
-		
-		// Calculate number of iterations;
-		
-		niterations = 0;
-		
-		for(int h1 = (-1 * getIndexingMaxH()) ; h1 <= getIndexingMaxH() ; h1++){
-			for(int k1 = (-1 * getIndexingMaxK()) ; k1 <= getIndexingMaxK() ; k1++){
-				for(int l1 = (-1 * getIndexingMaxL()) ; l1 <= getIndexingMaxL() ; l1++){
-					for(int h2 = (-1 * getIndexingMaxH()) ; h2 <= getIndexingMaxH() ; h2++){
-						for(int k2 = (-1 * getIndexingMaxK()) ; k2 <= getIndexingMaxK() ; k2++){
-							for(int l2 = (-1 * getIndexingMaxL()) ; l2 <= getIndexingMaxL() ; l2++){
-								emit progress(++niterations);
-								if(isFundamental(h1,k1,l1)){
-									if(isFundamental(h2,k2,l2)){
-										// Check the angle between vectors
-										
-										if(restart)
-											break;
-										if(abort)
-											return;
-										
-										Matrix vec1(h1,k1,l1);
-										Matrix vec2(h2,k2,l2);
-										
-										vec1 = newOrient.getB() * vec1;
-										vec1 = vec1 / vec1.mag();
-										vec2 = newOrient.getB() * vec2;
-										vec2 = vec2 / vec2.mag();
-										
-										double gamma = cos(vec1.dot(vec2));
-										
-										if(abs(gamma - theta) < getIndexingAngularTol()){
-											// Ok so we have a match to primary and secondary
-											// try all other reflections then
-											//  cerr << "MATCH : (" << h1 << "," << k1 << "," << l1 << ") and (";
-											//  cerr << h2 << "," << k2 << "," << l2 << ")" << endl;
-											// Now calculate a possible U matrix from the Primary and Secondary
-											
-											Matrix Tc(3,3), Td(3,3), newU(3,3);
-											Matrix Tc2(3,1), Tc3(3,1);
-											Matrix Td2(3,1), Td3(3,1);
-											
-											Tc3 = vec1 ^ vec2;
-											Tc3 = Tc3 / Tc3.mag();
-											Tc2 = Tc3 ^ vec1;
-											Tc2 = Tc2 / Tc2.mag();
-											
-											primary = primary / primary.mag();
-											secondary = secondary / secondary.mag();
-											
-											Td3 = primary ^ secondary;
-											Td3 = Td3 / Td3.mag();
-											Td2 = Td3 ^ primary;
-											Td2 = Td2 / Td2.mag();
-											
-											for(int i = 0 ; i < 3 ; i++ ){
-												// Load up the matricies Tc and Td;
-												Tc.Set(i,0,vec1.Get(i,0));
-												Tc.Set(i,1,Tc2.Get(i,0));
-												Tc.Set(i,2,Tc3.Get(i,0));
-												
-												Td.Set(i,0,primary.Get(i,0));
-												Td.Set(i,1,Td2.Get(i,0));
-												Td.Set(i,2,Td3.Get(i,0));
-											}
-											
-											newU = Td * Tc.transpose();
-											newOrient.setU(newU);
-											
-											// Now calculate spot position for secondary
-											
-											LaueSpot s;
-											if(calcHKL(&newOrient, &s, h2,k2,l2)) {
-												// Check if this spot is in the right place.
-												
-												double diff = pow(pow(s.X() - indexSpotsX[1],2) + pow(s.Y() - indexSpotsY[1],2),0.5);
-												
-												if(diff < getIndexingSpotTol()){
-													int spotcount;
-													calc(&newOrient, &abort, &spotcount);
-													
-													int nFoundSpots = 2;
-													double error = diff;
-													
-													for(int n = 2; n < numIndexSpots ; n++){
-														// Check if there is a spot in this place
-														int sn = findSpot(indexSpotsX[n], indexSpotsY[n], getIndexingSpotTol());
-														if( sn != -1){
-															nFoundSpots++;
-															error = error + pow(pow(getSpot(sn)->X() - indexSpotsX[n],2) + pow(getSpot(sn)->Y() - indexSpotsY[n],2),0.5);
-														}
-													}
-													
-													// Now store the solution
-													// cerr << "Orientations = " << (nOrientations) << endl;
-													orientations[nOrientations].setU(newU);
-													orientations[nOrientations].setNumMatches(nFoundSpots);							
-													orientations[nOrientations].setPatternError(error / nFoundSpots);
-													orientations[nOrientations].setP(h1,k1,l1);
-													orientations[nOrientations].setS(h2,k2,l2);
-													nOrientations++;
-												}
-											}
-										}
-									}
-								}
-							}
-						}
-					}
-				}
-			}
-		}
-		
-		sort(orientations, orientations + nOrientations);
-		
-		emit newIndexingAvaliable(nOrientations, orientations);
-		
-		mutex.lock();
-		if(!restart)
-			condition.wait(&mutex);
-		restart = false;
-		mutex.unlock();
-	}
+    int lastPercent = -1;
+    indexingResult = lauegram::indexLaue(newOrient,indexSpots,[&](int percent) {
+        if(percent != lastPercent) {
+            emit progress(percent);
+            lastPercent = percent;
+        }
+        return isInterruptionRequested();
+    });
 }
 
-LaueThread::LaueThread(QObject *parent) :
-QThread(parent), lauegram()
-{
-	restart = false;
-	abort = false;
+LaueThread::LaueThread(QObject *parent) : QThread(parent), lauegram() {
+    connect(this, &QThread::finished, this, &LaueThread::finishCalculation,
+            Qt::QueuedConnection);
 }
 
 LaueThread::~LaueThread() {
-	mutex.lock();
-	abort = true;
-	condition.wakeOne();
-	mutex.unlock();
-	
-	wait();
+    requestInterruption();
+    wait();
 }
 
-void LaueThread::run(){
-	
-	forever {
-	
-		emit calcStarted();
-		
-		int maxH = (int)(2.0 * getMaxKVec() * crystal->getLatticeA() / calcPrecision());
-		int maxK = (int)(2.0 * getMaxKVec() * crystal->getLatticeB() / calcPrecision());
-		int maxL = (int)(2.0 * getMaxKVec() * crystal->getLatticeC() / calcPrecision());
-		
-		int spotn = 0;
-		int spotstocalc = maxH * maxK * maxL * 8;
-		int hklcount = 0;
-		
-		for(int h=0; h<=maxH; h++){
-			for(int k=0; k<=maxK; k++){
-				for(int l=0; l<=maxL; l++){
-					
-					int mask = ((h == 0) ? 1 : 0);
-					mask = mask << ((k == 0) ? 1 : 0);
-					mask = mask << ((l == 0) ? 1 : 0);
-					
-					for(int n=0;n<=7;n++){
-						if( n & mask)
-							continue;
-						int th = h * ( (n & 1) ? -1 : 1);
-						int tk = k * ( (n & 2) ? -1 : 1);
-						int tl = l * ( (n & 4) ? -1 : 1);
-						if(calcHKL(crystal, getSpot(spotn),th,tk,tl)){
-							spotn++;
-						}
-					}
-					
-					if(abort){
-						setNspots(spotn);
-						emit partialCalc();
-						return;
-					}
-					
-					if(restart){
-						setNspots(spotn);
-						emit partialCalc();
-						break;
-					}
-				}
-			}
-			if(calcPrecision() <= 2){
-				int percentcomp = (int)(100.0 * (double)hklcount / (double)spotstocalc);
-				hklcount+= 8 * maxL * maxK;
-				emit spotsToGo(percentcomp);
-			}
-		}
-		
-		setNspots(spotn);
-		emit calculated();
-		mutex.lock();
-		// Shutdown can be requested while the calculated signal is delivered.
-		if(abort){
-			mutex.unlock();
-			return;
-		}
-		if (!restart)
-			condition.wait(&mutex);
-		restart = false;
-		mutex.unlock();
-	}
+void LaueThread::run() {
+    int lastPercent = -1;
+    activeComplete = activeCalculation.calc(&activeCrystal, [&](int percent) {
+        if(percent != lastPercent) {
+            emit spotsToGo(percent);
+            lastPercent = percent;
+        }
+        return isInterruptionRequested();
+    });
 }
 
-void LaueThread::startCalculation(Crystal *c){
-	QMutexLocker locker(&mutex);
-	crystal = c;
-	if(!isRunning()) {
-		start(NormalPriority);
-	} else {
-		restart = true;
-		condition.wakeOne();
-	}
+void LaueThread::startCalculation(Crystal *c) {
+    if(!c) return;
+    pendingCrystal = *c;
+    pendingCalculation = static_cast<const lauegram &>(*this);
+    hasPending = true;
+    if(calculationActive) requestInterruption();
+    else launchPending();
+}
+
+void LaueThread::launchPending() {
+    activeCrystal = pendingCrystal;
+    activeCalculation = pendingCalculation;
+    hasPending = false;
+    activeComplete = false;
+    calculationActive = true;
+    emit calcStarted();
+    start(NormalPriority);
+}
+
+void LaueThread::finishCalculation() {
+    // finished() may be emitted before all native thread cleanup is complete.
+    wait();
+    calculationActive = false;
+    if(hasPending) {
+        launchPending();
+        return;
+    }
+    if(activeComplete) {
+        copySpotsFrom(activeCalculation);
+    } else {
+        setNspots(0);
+        emit calculationFailed(tr("The diffraction calculation could not finish. Check the lattice, wavelength range and accuracy settings."));
+    }
+    emit calculated();
 }
 
 
@@ -377,8 +163,8 @@ LaueFilm::LaueFilm(QWidget *parent, Crystal* c)
 	
 	// Initialize arrays
 	
-	orientationSpotsX = new double[100];
-	orientationSpotsY = new double[100];
+	orientationSpotsX = new double[lauegram::MaxIndexingSpots];
+	orientationSpotsY = new double[lauegram::MaxIndexingSpots];
 	
 	// Setup laue class
 	
@@ -389,6 +175,7 @@ LaueFilm::LaueFilm(QWidget *parent, Crystal* c)
 	
 	// Connect thread finished
 	connect(laue, SIGNAL(calculated()), this, SLOT(displayAfterCalc()));
+	connect(laue, SIGNAL(calculationFailed(QString)), this, SLOT(displayMessage(QString)));
 	connect(laue, SIGNAL(partialCalc()), this, SLOT(displayAfterCalc()));
 	
 	laue->setDebug(false);
@@ -402,7 +189,7 @@ LaueFilm::LaueFilm(QWidget *parent, Crystal* c)
 	laueOrigin = QPointF(0,0);
 	origin_circle = 0.5;
 
-	pixels_per_mm = 1000 / 172; // This is approximately 172 micron pixel size for PSL (2 x 2 binning)
+	pixels_per_mm = 1000.0 / 172; // This is approximately 172 micron pixel size for PSL (2 x 2 binning)
 	rubberBand = 0;
 	
 	max_spot_size = 50;
@@ -420,25 +207,21 @@ LaueFilm::LaueFilm(QWidget *parent, Crystal* c)
 	display |= LaueFilm::DisplayCharacteristic;
 	
 	userAction = LaueFilm::UANone;
+	userActionStage = 0;
 	
 	laueMessage = QString("");
 	
 	setMouseTracking(true);
 	setFocusPolicy(Qt::StrongFocus);
 	
-	// Stuff for possible matches
-	
-	orientations = new LaueOrientations[65000];
-	numOrientations = 0;
-	
-	//grabKeyboard();
 }
 
 LaueFilm::~LaueFilm(){
 	delete importedImage;
 	delete importedScaledImage;
 	delete importedAdjustedImage;
-	delete [] orientations;
+	delete laueIndexing;
+	delete laue;
 	delete [] orientationSpotsX;
 	delete [] orientationSpotsY;
 }
@@ -494,9 +277,12 @@ void LaueFilm::setDisplayImage(bool yesno){
 }
 
 void LaueFilm::setRotateImage(bool yesno){
-	setBit(&display, LaueFilm::DisplayImageRotated, yesno);
-	setAdjustedImage();
-	update();
+    const bool changed = getBit(display, LaueFilm::DisplayImageRotated) != yesno;
+    if(changed) clearOrientation();
+    setBit(&display, LaueFilm::DisplayImageRotated, yesno);
+    setAdjustedImage();
+    if(changed) imageZoomRect = importedAdjustedImage->rect();
+    update();
 }
 
 void LaueFilm::showLabels(bool flag){ 
@@ -516,16 +302,18 @@ void LaueFilm::paintEvent(QPaintEvent *) {
 	paintMsgBox(&painter, messageRect);
 	paintLaueBox(&painter, laueRect);
 	
+	prepareImage(laueRect);
 	if(getBit(display,LaueFilm::DisplayImage))
 		paintImage(&painter, laueRect);
 	
 	paintLaueAxes(&painter, laueRect);
 	
-	if(getBit(display,LaueFilm::DisplayLaue))
+	if(getBit(display,LaueFilm::DisplayLaue) &&
+	   (userAction & (UASetOrigin|UAMeasureScale|UASelectOrientation)) == 0)
 		paintLaue(&painter, laueRect);
 	
-	if(getBit(display, LaueFilm::DisplayOrigin))
-		paintOrigin(&painter, laueRect);
+	if(getBit(userAction,UASetOrigin) || (getBit(display,DisplayOrigin) && !getBit(userAction,UAMeasureScale)))
+		paintOrigin(&painter, laueRect, true);
 		
 	if(getBit(display, LaueFilm::DisplayIndexing))
 		paintIndexing(&painter, laueRect);
@@ -560,10 +348,12 @@ void LaueFilm::print(QPrinter *printer, QPainter *painter, int mode){
 	QScopedValueRollback<QPoint> screenImageCenter(importedImageCenter);
 	
 	paintLaueBox(painter, laueR);
+	prepareImage(laueR);
 	if(getBit(display,LaueFilm::DisplayImage))
 		paintImage(painter, laueR);
 	paintLaueAxes(painter, laueR);
-	paintLaue(painter,laueR);
+	if(getBit(display,LaueFilm::DisplayLaue))
+		paintLaue(painter,laueR);
 	paintOrigin(painter, laueR);
 
 	// Draw Bounding Rectangle
@@ -703,12 +493,12 @@ void LaueFilm::paintLaueAxes(QPainter *painter, QRect laue){
 					  mmlen);
 }
 
-void LaueFilm::paintOrigin(QPainter *painter, QRect size){
+void LaueFilm::paintOrigin(QPainter *painter, QRect size, bool preview){
 	
 	painter->setBrush(QColor(0,0,255));
 	painter->resetMatrix();
 		
-	QPoint oxy = worldToPixels(QPointF(0,0));
+	QPoint oxy = worldToPixels(preview && getBit(userAction,UASetOrigin) ? originPreview-laueOrigin : QPointF(0,0));
 	painter->setPen(QColor(0,0,255));
 	painter->setBrush(Qt::NoBrush);
 	painter->translate(oxy);
@@ -725,12 +515,13 @@ void LaueFilm::paintOrigin(QPainter *painter, QRect size){
 	painter->resetMatrix();
 }
 
-void LaueFilm::paintImage(QPainter *painter, QRect size)
-{	
-	painter->resetMatrix();
-	
-	painter->setClipRect(size,Qt::ReplaceClip);
-
+void LaueFilm::prepareImage(QRect size) {
+	// Coordinate geometry belongs to the viewport, even when the bitmap is hidden.
+	if(importedAdjustedImage->isNull()) {
+		*importedScaledImage = QImage();
+		importedImagePos = importedImageCenter = size.center();
+		return;
+	}
 	QImage newimage = importedAdjustedImage->copy(imageZoomRect);
 	newimage = newimage.scaled(size.size(), Qt::KeepAspectRatio);
 	*importedScaledImage = newimage;
@@ -749,6 +540,13 @@ void LaueFilm::paintImage(QPainter *painter, QRect size)
 	
 	importedImagePos = paintsize.topLeft();
 	importedImageCenter = paintsize.center();
+}
+
+void LaueFilm::paintImage(QPainter *painter, QRect size)
+{
+	painter->resetMatrix();
+	painter->setClipRect(size,Qt::ReplaceClip);
+	const QImage &newimage = *importedScaledImage;
 	painter->drawImage(importedImagePos, newimage);
 	
 	if(getBit(userAction, UASelectOrientation) || getBit(userAction, UASelectUBOrientation)){
@@ -931,7 +729,9 @@ void LaueFilm::setU(Matrix U){
 }
 
 void LaueFilm::setFSDistance(double d){
+	const double previous = laue->getDistance();
 	laue->setDistance(d);
+	if(laue->getDistance() != previous) clearOrientationResults();
 	reCalc();
 }
 
@@ -944,10 +744,17 @@ void LaueFilm::mousePressEvent(QMouseEvent *event){
 	if(getBit(userAction,LaueFilm::UASelectOrientation)) {
 		
 		if(laueRect.contains(event->pos())){
+            if(numOrientationSpots >= lauegram::MaxIndexingSpots) {
+                displayMessage(tr("Maximum %1 spots selected. Press Enter to start indexing.").arg(lauegram::MaxIndexingSpots));
+                return;
+            }
 			QPointF spot = pixelsToWorld(event->pos());
+            for(int i = 0; i < numOrientationSpots; ++i)
+                if(QLineF(spot,QPointF(orientationSpotsX[i],orientationSpotsY[i])).length() < 1e-8) return;
 			orientationSpotsX[numOrientationSpots] = (double)spot.x();
 			orientationSpotsY[numOrientationSpots] = (double)spot.y();
 			numOrientationSpots++;
+            displayMessage(tr("%1 spots selected; Enter to solve.").arg(numOrientationSpots));
 			update();
 		}
 		
@@ -965,9 +772,7 @@ void LaueFilm::mousePressEvent(QMouseEvent *event){
 		}
 		
 		if(numUBOrientationSpots == 2){
-			userAction = UANone;
-			displayMessage(QString(""));
-			update();
+			finishTool(true);
 			resetOrientation();
 		}
 		
@@ -989,16 +794,16 @@ void LaueFilm::mousePressEvent(QMouseEvent *event){
 	
 	if(getBit(userAction,LaueFilm::UASetOrigin)){
 		// We were asked to define the origin 
+		if(!laueRect.contains(event->pos())) { event->accept(); return; }
 		double isf = imageScaleFactor();
 		QPoint pixel = event->pos() - laueRect.center();
-		laueOrigin = QPointF(pixel.x() * isf / pixels_per_mm, -1 * pixel.y() * isf /  pixels_per_mm);
-		userAction = LaueFilm::UANone;
-		setCursor(Qt::ArrowCursor);
-		setMouseTracking(true);
-		setBit(&display, LaueFilm::DisplayLaue, true);
-		setBit(&display, LaueFilm::DisplayOrigin, true);
-		clearMessage();
-		update();
+		const QPointF origin(pixel.x() * isf / pixels_per_mm, -1 * pixel.y() * isf / pixels_per_mm);
+		finishTool(true);
+		if(origin != laueOrigin) {
+			laueOrigin = origin;
+			clearOrientation();
+		}
+		event->accept();
 		return;
 	}
 	
@@ -1030,7 +835,7 @@ void LaueFilm::mousePressEvent(QMouseEvent *event){
 		return;
 	}
 	
-	if(QApplication::keyboardModifiers()  == Qt::ShiftModifier){
+	if(event->modifiers() == Qt::ShiftModifier){
 		QPointF spot = pixelsToWorld(event->pos());
 		int snum = laue->findSpot(spot.x(),spot.y(),1);
 
@@ -1072,33 +877,34 @@ void LaueFilm::mouseReleaseEvent(QMouseEvent *event){
 	} 
 
 	if(getBit(userAction, UARotateAboutAxis) && (userActionStage == 3)){
-		userAction = UANone;
-		setBit(&display, DisplayRotateAboutCross, false);
-		update();
+		finishTool(true);
 		event->accept();
 		return;
 	}
 
 	if(getBit(userAction,LaueFilm::UAMeasureScale)){
-		userAction = LaueFilm::UANone;
-		
-		rubberBand->hide();
-		// Last set of coordinates
-		
-		QPoint dxy = event->pos() - rubberBandOrigin;
-		
-		FilmSizeDialog dialog;
-		if(dialog.exec() == QDialog::Accepted){
-			double reallength = dialog.getFilmWidth();
-			// WARNING : comparing only along the x axis.
-			pixels_per_mm = (double)dxy.x() * imageScaleFactor() / reallength;
+		const bool measured = rubberBand && userActionStage == 2;
+		const double width = std::abs(double(event->pos().x()) - rubberBandOrigin.x());
+		finishTool(false);
+		QString error;
+		if(!measured || width == 0) {
+			error = tr("Select a nonzero horizontal width to calibrate the image.");
+		} else {
+			FilmSizeDialog dialog(this);
+			dialog.setWindowTitle(tr("Measured width (millimetres)"));
+			if(dialog.exec() == QDialog::Accepted){
+				const double reallength = dialog.getFilmWidth();
+				const double measuredScale = reallength > 0 ? width * imageScaleFactor() / reallength : 0;
+				if(std::isfinite(reallength) && reallength > 0 &&
+				   std::isfinite(measuredScale) && measuredScale > 0) {
+					calibrateScale(measuredScale);
+				} else {
+					error = tr("The measured width must be a finite, positive number of millimetres. Scale unchanged.");
+				}
+			}
 		}
 		
-		setCursor(Qt::ArrowCursor);
-		setMouseTracking(true);
-		setBit(&display, LaueFilm::DisplayLaue, true);
-		setBit(&display, LaueFilm::DisplayOrigin, true);
-		update();
+		if(!error.isEmpty()) displayMessage(error);
 		event->accept();
 		return;
 	}
@@ -1126,7 +932,22 @@ void LaueFilm::mouseReleaseEvent(QMouseEvent *event){
 }
 
 void LaueFilm::setPixelsPerMMFromImage(void){
-	pixels_per_mm = importedImage->dotsPerMeterX() / 1000;
+	finishTool(false);
+	const double imageScale = importedImage->dotsPerMeterX() / 1000.0;
+	if(importedImage->isNull() || imageScale <= 0) {
+		displayMessage(tr("The image has no valid pixel-size metadata. Scale unchanged."));
+		return;
+	}
+	calibrateScale(imageScale);
+}
+
+namespace {
+double dragRotation(const QPointF &start, const QPointF &stop) {
+	const double a = std::hypot(start.x(),start.y()), b = std::hypot(stop.x(),stop.y());
+	if(!std::isfinite(a) || !std::isfinite(b) || a == 0 || b == 0) return 0;
+	const QPointF u = start/a, v = stop/b;
+	return -std::atan2(u.x()*v.y()-u.y()*v.x(),u.x()*v.x()+u.y()*v.y());
+}
 }
 
 void LaueFilm::mouseMoveEvent(QMouseEvent *event){
@@ -1136,7 +957,8 @@ void LaueFilm::mouseMoveEvent(QMouseEvent *event){
 	if(	getBit(userAction,LaueFilm::UAMeasureZoom) || 
 		getBit(userAction,LaueFilm::UAMeasureScale)){
 		
-		rubberBand->setGeometry(QRect(rubberBandOrigin, event->pos()).normalized());
+		if(rubberBand && userActionStage == 2)
+			rubberBand->setGeometry(QRect(rubberBandOrigin, event->pos()).normalized());
 		event->accept();
 		return;
 	}
@@ -1145,7 +967,7 @@ void LaueFilm::mouseMoveEvent(QMouseEvent *event){
 		if(laueRect.contains(event->pos())){
 			double isf = imageScaleFactor();
 			QPoint pixel = event->pos() - laueRect.center();
-			laueOrigin = QPointF(pixel.x() * isf / pixels_per_mm, -1 * pixel.y() * isf /  pixels_per_mm);
+			originPreview = QPointF(pixel.x() * isf / pixels_per_mm, -1 * pixel.y() * isf /  pixels_per_mm);
 			update();
 			event->accept();
 			return;
@@ -1168,17 +990,8 @@ void LaueFilm::mouseMoveEvent(QMouseEvent *event){
 		QPointF stopX = pixelsToWorld(event->pos());
 		QPointF startX = pixelsToWorld(moveStart);
 		
-		double dot = (startX.x() * stopX.x()) + (startX.y() * stopX.y());
-		double mag = sqrt(pow((double)startX.x(),2) + pow((double)startX.y(),2)) 
-				   * sqrt(pow((double)stopX.x(),2) + pow((double)stopX.y(),2));
-		
-		int cross = (startX.x() * stopX.y()) - (startX.y() * stopX.x());
-		double angle = acos(dot / mag);
-		
-		if(cross > 0)
-			angle = -1.0 * angle;
-
-		emit rotationsChanged(angle, 0.0, 0.0);
+		const double angle = dragRotation(startX,stopX);
+		if(angle != 0) emit rotationsChanged(angle, 0.0, 0.0);
 		moveStart = event->pos();
 		
 	} else if (getBit(userAction, UARotateAboutAxis)) {
@@ -1186,20 +999,13 @@ void LaueFilm::mouseMoveEvent(QMouseEvent *event){
 			QPointF stopX = pixelsToWorld(event->pos()) - rotateAboutAxisPoint;
 			QPointF startX = pixelsToWorld(moveStart) - rotateAboutAxisPoint;
 			
-			double dot = (startX.x() * stopX.x()) + (startX.y() * stopX.y());
-			double mag = sqrt(pow((double)startX.x(),2) + pow((double)startX.y(),2)) 
-				   * sqrt(pow((double)stopX.x(),2) + pow((double)stopX.y(),2));
-		
-			int cross = (startX.x() * stopX.y()) - (startX.y() * stopX.x());
-			double angle = acos(dot / mag);
-		
-			if(cross > 0)
-				angle = -1.0 * angle;
-			
-			Matrix pri = laue->filmposToVector(rotateAboutAxisPoint.x(),rotateAboutAxisPoint.y());
-			crystal->rotateAboutBy(pri, angle);
+			const double angle = dragRotation(startX,stopX);
+			if(angle != 0) {
+				Matrix pri = laue->filmposToVector(rotateAboutAxisPoint.x(),rotateAboutAxisPoint.y());
+				crystal->rotateAboutBy(pri, angle);
+				emit rotationsChanged(0.0 ,0.0 , 0.0);
+			}
 			moveStart = event->pos();
-			emit rotationsChanged(0.0 ,0.0 , 0.0);
 			update();
 		}
 		event->accept();
@@ -1252,17 +1058,37 @@ void LaueFilm::mouseMoveEvent(QMouseEvent *event){
 }
 
 void LaueFilm::keyPressEvent(QKeyEvent *event){
+    if(getBit(userAction,UASelectOrientation)) {
+        if(event->key() == Qt::Key_Backspace || event->key() == Qt::Key_Delete) {
+            if(numOrientationSpots > 0) --numOrientationSpots;
+            displayMessage(tr("%1 spots selected; Enter to solve.").arg(numOrientationSpots));
+            update();
+            event->accept();
+            return;
+        }
+        if(event->key() == Qt::Key_Return || event->key() == Qt::Key_Enter) {
+            finishTool(true);
+            resolveOrientation();
+            event->accept();
+            return;
+        }
+    }
 	if(event->key() == Qt::Key_Escape){
+		if(toolActive && !getBit(userAction,UASelectOrientation)) {
+			finishTool(false);
+			event->accept();
+			return;
+		}
 		
 		if(getBit(userAction, UASelectOrientation)){
-			userAction = UANone;
+			finishTool(true);
 			displayMessage(QString("Calculating .."));
 			update();
 			
+			unsetCursor();
 			resolveOrientation();
 			
 			event->accept();
-			displayMessage(QString(""));
 			return;
 		} else {
 			userAction = LaueFilm::UANone;
@@ -1361,6 +1187,7 @@ double LaueFilm::imageScaleFactor(void){
 }
 
 void LaueFilm::rotateAboutAxis(void) {
+	finishTool(false);
 	// This only works in free rotate 
 	// so check, and if not warn with a message box.
 	
@@ -1370,47 +1197,112 @@ void LaueFilm::rotateAboutAxis(void) {
 		return;
 	}
 
-	setBit(&userAction, UARotateAboutAxis, true);
+	beginTool(UARotateAboutAxis);
 	userActionStage = 1;
 	displayMessage(QString("Click on point to rotate about."));
 	setCursor(Qt::CrossCursor);
 }
 
 void LaueFilm::setOrigin(void) {
-	userAction = LaueFilm::UASetOrigin;
-	setBit(&display, LaueFilm::DisplayLaue, false);
-	setBit(&display, LaueFilm::DisplayOrigin, true);
+	beginTool(UASetOrigin);
+	originPreview = laueOrigin;
 	setCursor(Qt::BlankCursor);
 	setMouseTracking(true);
 	displayMessage(QString("Click in window to define origin."));
 }
 
 void LaueFilm::measureScale(void) {
-	userAction = LaueFilm::UAMeasureScale;
+	beginTool(UAMeasureScale);
+	userActionStage = 1;
 	setCursor(Qt::CrossCursor);
 	setMouseTracking(false);
-	displayMessage(QString("Click and drag to measure."));
-	setBit(&display, LaueFilm::DisplayLaue, false);
-	setBit(&display, LaueFilm::DisplayOrigin, false);
+	displayMessage(tr("Drag horizontally across a known width, then enter its width in millimetres."));
 	update();
 }
 
 void LaueFilm::setImageScale(void) {
+	finishTool(false);
 	bool ok;
 	
-	double pixelSize = 1000 / pixels_per_mm;
+	double pixelSize = 1000.0 / pixels_per_mm;
 	
 	pixelSize = QInputDialog::getDouble(this, tr(APP_NAME),
-											tr("Pixel size (microns)"), pixelSize, 0, 20000, 2, &ok);
+											tr("Pixel size (microns; must be greater than zero)"), pixelSize, 0, 20000, 2, &ok);
 	if(ok){
-		// Origional Image length in mm
-		pixels_per_mm = (1000.0 / pixelSize);
-		qDebug() << QString("LaueFilm::setImageScale() : pixels_per_mm = %1").arg(pixels_per_mm);
+		if(std::isfinite(pixelSize) && pixelSize > 0)
+			calibrateScale(1000.0 / pixelSize);
+		else
+			displayMessage(tr("Pixel size must be a finite, positive number. Scale unchanged."));
 	}	
 }
 
+void LaueFilm::setOriginX(double x) {
+	if(std::isfinite(x) && x != laueOrigin.x()) {
+		laueOrigin.setX(x);
+		clearOrientation();
+	}
+}
+
+void LaueFilm::setOriginY(double y) {
+	if(std::isfinite(y) && y != laueOrigin.y()) {
+		laueOrigin.setY(y);
+		clearOrientation();
+	}
+}
+
+void LaueFilm::setScale(double value) {
+	if(std::isfinite(value) && value > 0 && value != pixels_per_mm) {
+		pixels_per_mm = value;
+		clearOrientation();
+	}
+}
+
+void LaueFilm::calibrateScale(double value) {
+	if(!std::isfinite(value) || value <= 0) return;
+	const QPointF origin = laueOrigin * (pixels_per_mm / value);
+	if(!std::isfinite(origin.x()) || !std::isfinite(origin.y())) return;
+	// UI calibration keeps the selected beam pixel fixed. setScale alone restores XTL state.
+	laueOrigin = origin;
+	setScale(value);
+}
+
+void LaueFilm::beginTool(int action) {
+	finishTool(false);
+	toolCursor = cursor();
+	toolHadCursor = testAttribute(Qt::WA_SetCursor);
+	toolMouseTracking = hasMouseTracking();
+	toolOriginCircle = origin_circle;
+	toolActive = true;
+	userAction = action;
+	userActionStage = 0;
+}
+
+void LaueFilm::finishTool(bool accepted) {
+	if(!toolActive) return;
+	if(!accepted) origin_circle = toolOriginCircle;
+	if(!accepted && getBit(userAction,UASelectOrientation)) {
+		numOrientationSpots = 0;
+		setBit(&display,DisplayIndexing,false);
+	}
+	if(!accepted && getBit(userAction,UASelectUBOrientation)) {
+		numUBOrientationSpots = 0;
+		setBit(&display,DisplayUBIndexing,false);
+	}
+	if(getBit(userAction,UARotateAboutAxis)) setBit(&display,DisplayRotateAboutCross,false);
+	if(toolHadCursor) setCursor(toolCursor);
+	else unsetCursor();
+	setMouseTracking(toolMouseTracking);
+	if(rubberBand) rubberBand->hide();
+	userAction = UANone;
+	userActionStage = 0;
+	toolActive = false;
+	clearMessage();
+}
+
 void LaueFilm::measureZoom(void) {
+	finishTool(false);
 	userAction = LaueFilm::UAMeasureZoom;
+	userActionStage = 1;
 	setCursor(Qt::CrossCursor);
 	displayMessage(QString("Click and drag to zoom."));
 	setMouseTracking(false);
@@ -1418,7 +1310,7 @@ void LaueFilm::measureZoom(void) {
 }
 
 void LaueFilm::resetZoom(void) {
-	imageZoomRect = QRect(QPoint(0, 0), importedImage->size());
+	imageZoomRect = importedAdjustedImage->rect();
 	update();
 }
 
@@ -1433,8 +1325,11 @@ void LaueFilm::clearMessage(void){
 }
 
 void LaueFilm::resetView(void){
+	finishTool(false);
+	const bool movedOrigin = !laueOrigin.isNull();
 	laueOrigin = QPointF(0,0);
-	pixels_per_mm = 100;
+	setScale(100);
+	if(movedOrigin) clearOrientation();
 	update();
 }
 
@@ -1454,6 +1349,10 @@ void LaueFilm::addIndexLabel(double h, double k, double l){
 			return;
 		}
 	}
+	if(num_hkl_labels >= int(sizeof(hkl_labels) / sizeof(hkl_labels[0]))) {
+		displayMessage(tr("The label limit has been reached. Clear labels before adding more."));
+		return;
+	}
 	hkl_labels[num_hkl_labels][0] = h;
 	hkl_labels[num_hkl_labels][1] = k;
 	hkl_labels[num_hkl_labels][2] = l;
@@ -1469,79 +1368,112 @@ void LaueFilm::displayAfterCalc(void){
 	emit recalculated();
 }
 
-void LaueFilm::resolveOrientation(void){
-	// First check to se if we have two or more
-	// spots and if not we display a message box
-	
-	if(numOrientationSpots >= 2){
+void LaueFilm::resolveOrientation(void) {
+    if(indexingInProgress) return;
+    finishTool(getBit(userAction,UASelectOrientation));
+    QScopedValueRollback<bool> running(indexingInProgress,true);
+    if(numOrientationSpots < 2) {
+        QMessageBox::warning(this,tr(APP_NAME),tr("Select at least two separated reflections to index the Laue pattern."));
+        update();
+        return;
+    }
+    const quint64 revision = orientationRevision;
+    IndexingDialog dialog(this);
+    dialog.setIndexingParams(laueIndexing);
+    if(dialog.exec() != QDialog::Accepted) { update(); return; }
+    dialog.getIndexingParams(laueIndexing);
+    if(revision != orientationRevision) {
+        displayMessage(tr("Orientation inputs changed; select reflections again."));
+        update();
+        return;
+    }
+    laueIndexing->setDistance(laue->getDistance());
+    laueIndexing->setLambdaRange(laue->getLambdaRangeMin(),laue->getLambdaRangeMax());
+    QVector<QPointF> points;
+    for(int i = 0; i < numOrientationSpots; ++i)
+        points.append(QPointF(orientationSpotsX[i],orientationSpotsY[i]));
 
-		IndexingDialog dialog(this);
-		dialog.setIndexingParams(laueIndexing);
-		if(dialog.exec() == QDialog::Accepted){
-		
-			dialog.getIndexingParams(laueIndexing);
-			
-			laueIndexing->setDistance(laue->getDistance());
-			laueIndexing->setLambdaRange(laue->getLambdaRangeMax(), laue->getLambdaRangeMin());
-			laueIndexing->setCalcPrecision(laue->calcPrecision());
-			
-			// Show progress
-			
-			int maxIterations = laueIndexing->getMaxIterations();
-			QProgressDialog progress("Indexing Laue pattern. Please wait...", 
-									 "Abort", 0, maxIterations, this);
-			progress.setWindowModality(Qt::WindowModal);
-			progress.setAutoReset(true);
-			progress.setValue(0);
-			
-			laueIndexing->indexLaue(crystal, numOrientationSpots, orientationSpotsX, orientationSpotsY);
-			
-			int tries = 0;
-			while((tries < maxIterations) && !progress.wasCanceled()) {
-				qApp->processEvents();
-				tries = laueIndexing->triesToGo();
-				progress.setValue(tries);
-			} 
-			
-			setBit(&display, LaueFilm::DisplayIndexing, true);
-			
-		} else {
-			
-			setBit(&display, LaueFilm::DisplayIndexing, false);
-		
-		}	
-	
-	} else {
-		QMessageBox::warning(this, tr(APP_NAME), 
-					tr("You have to select at least two reflections to index the Lauegram."), QMessageBox::Ok);
-		numOrientationSpots = 0;
-		setBit(&display, LaueFilm::DisplayIndexing, false);
-	}
-	
-	setBit(&display, LaueFilm::DisplayLaue, true);
-	update();
-	return;
+    QProgressDialog progress(tr("Searching crystal orientations..."),tr("Cancel"),0,100,this);
+    progress.setWindowModality(Qt::ApplicationModal);
+    progress.setAutoClose(false);
+    progress.setAutoReset(false);
+    progress.setMinimumDuration(0);
+    QEventLoop loop;
+    bool canceled = false;
+    bool finished = false;
+    connect(laueIndexing,&LaueIndexingThread::progress,&progress,&QProgressDialog::setValue);
+    connect(laueIndexing,&QThread::finished,&loop,[&] { finished = true; loop.quit(); });
+    connect(&progress,&QProgressDialog::canceled,&loop,[&] {
+        canceled = true;
+        laueIndexing->requestInterruption();
+    });
+    if(!laueIndexing->indexLaue(*crystal,points)) return;
+    progress.show();
+    loop.exec();
+    if(!finished) {
+        canceled = true;
+        laueIndexing->requestInterruption();
+    }
+    // finished() can precede the last thread cleanup; join before reading the result.
+    laueIndexing->wait();
+    progress.hide();
+    const LaueIndexingResult &result = laueIndexing->result();
+    if(revision != orientationRevision) {
+        displayMessage(tr("Orientation inputs changed; select reflections again."));
+        update();
+        return;
+    } else if(canceled || result.canceled) {
+        displayMessage(tr("Canceled; orientation unchanged."));
+    } else if(!result.error.isEmpty()) {
+        QMessageBox::warning(this,tr(APP_NAME),result.error);
+    } else {
+        orientations = result.orientations;
+        emit newIndexingAvailable();
+        if(orientations.isEmpty()) {
+            QMessageBox::information(this,tr(APP_NAME),
+                tr("No matching orientation was found. Check the lattice, beam center, image scale, "
+                   "detector distance, wavelength range and selected spots, then adjust the search limits or tolerances."));
+        } else {
+            displayMessage(result.truncated
+                ? tr("Best %1 candidates (limit reached).").arg(orientations.size())
+                : tr("%1 candidates; select a row below.").arg(orientations.size()));
+        }
+    }
+    setBit(&display,DisplayIndexing,true);
+    update();
 }
 
 void LaueFilm::solveOrientation(void){
+	if(indexingInProgress) return;
 	
-	setBit(&userAction, UASelectOrientation, true);
+	beginTool(UASelectOrientation);
 	numOrientationSpots = 0;
-	setBit(&display, LaueFilm::DisplayLaue, false);
 	setBit(&display, LaueFilm::DisplayIndexing, true);
 
 	setCursor(Qt::BlankCursor);
 	setMouseTracking(true);
-	displayMessage(QString("Select Laue spots for indexing (Esc. to stop)."));
+	displayMessage(tr("Select 2+ spots; Enter to solve."));
+}
+
+void LaueFilm::clearOrientationResults(void) {
+	++orientationRevision;
+	if(laueIndexing->isRunning()) laueIndexing->requestInterruption();
+	orientations.clear();
+	emit newIndexingAvailable();
+	clearMessage();
 }
 
 void LaueFilm::clearOrientation(void) {
+	finishTool(false);
 	numOrientationSpots = 0;
+	numUBOrientationSpots = 0;
 	setBit(&display, LaueFilm::DisplayIndexing, false);
+	setBit(&display, LaueFilm::DisplayUBIndexing, false);
+	clearOrientationResults();
 }
 
 void LaueFilm::setOrientation(void) {
-	setBit(&userAction, UASelectUBOrientation,true);
+	beginTool(UASelectUBOrientation);
 	numUBOrientationSpots = 0;
 	setBit(&display, LaueFilm::DisplayIndexing, false);
 	setBit(&display, LaueFilm::DisplayUBIndexing, true);
@@ -1552,13 +1484,24 @@ void LaueFilm::setOrientation(void) {
 }
 
 void LaueFilm::resetOrientation(void) {
+	if(numUBOrientationSpots != 2) return;
+	const quint64 revision = orientationRevision;
 	UMatrixDialog dialog;
-	if(dialog.exec() == QDialog::Accepted){
+	const int result = dialog.exec();
+	if(revision != orientationRevision || numUBOrientationSpots != 2) {
+		displayMessage(tr("Orientation inputs changed; select reflections again."));
+		return;
+	}
+	if(result == QDialog::Accepted){
 		Matrix pri = laue->filmposToVector(UBOrientationSpotsX[0],UBOrientationSpotsY[0]);
 		Matrix sec = laue->filmposToVector(UBOrientationSpotsX[1],UBOrientationSpotsY[1]);
 		
-		getCrystal()->setU(pri,sec,dialog.getPrimary(), dialog.getSecondary());
-		reCalc();
+        if(getCrystal()->setU(pri,sec,dialog.getPrimary(), dialog.getSecondary())) {
+            reCalc();
+            emit rotationsChanged(0,0,0);
+        } else
+            QMessageBox::warning(this, tr("Set orientation"),
+                tr("Select two nonzero, independent directions and two distinct diffraction spots."));
 	} else {
 		setBit(&display, DisplayUBIndexing, false);
 	}
@@ -1568,10 +1511,14 @@ void LaueFilm::resetOrientation(void) {
 }
 
 void LaueFilm::setImage(QImage& image, bool display){
+	clearOrientation();
 	*importedImage = image;
+	imageBrightnessValue = imageMinimumValue = 0;
+	imageContrastValue = 100;
+	imageMaximumValue = 255;
 	setAdjustedImage();
-	*importedScaledImage = image;
-	imageZoomRect = QRect(QPoint(0, 0), image.size());
+	*importedScaledImage = *importedAdjustedImage;
+	imageZoomRect = importedAdjustedImage->rect();
 	if(display){
 		setDisplayImage(true);
 	}
@@ -1589,14 +1536,19 @@ void LaueFilm::setAdjustedImage(void){
 		*importedAdjustedImage = importedAdjustedImage->transformed(r, Qt::FastTransformation);
 		*importedAdjustedImage = importedAdjustedImage->convertToFormat(QImage::Format_Indexed8, ct);
 	}
+	*importedAdjustedImage = changeImageMax(*importedAdjustedImage, imageMaximumValue);
+	*importedAdjustedImage = changeImageMin(*importedAdjustedImage, imageMinimumValue);
+	*importedAdjustedImage = changeImageBrightness(*importedAdjustedImage, imageBrightnessValue);
+	*importedAdjustedImage = changeImageContrast(*importedAdjustedImage, imageContrastValue);
 }
 
 void LaueFilm::adjustImage(double b, double c, double max, double min){
+	if(!std::isfinite(b) || !std::isfinite(c) || !std::isfinite(max) || !std::isfinite(min)) return;
+	imageBrightnessValue = qBound(-100.0,b,100.0);
+	imageContrastValue = qBound(0.0,c,100.0);
+	imageMaximumValue = qBound(0.0,max,255.0);
+	imageMinimumValue = qBound(0.0,min,255.0);
 	setAdjustedImage();
-	*importedAdjustedImage = changeImageMax(*importedAdjustedImage, max);
-	*importedAdjustedImage = changeImageMin(*importedAdjustedImage, min);	
-	*importedAdjustedImage = changeImageBrightness(*importedAdjustedImage, b);
-	*importedAdjustedImage = changeImageContrast(*importedAdjustedImage, c);
 	
 	repaint();
 }

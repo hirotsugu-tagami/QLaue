@@ -23,6 +23,8 @@ class PreferencesDialog : public QDialog
 	Q_OBJECT
 	
 	QStringList anodes;
+	double loadedLambdaMax = 3;
+	double shownTubeVoltage = 40;
 public:
 	PreferencesDialog();
 	void setLaue(lauegram* laue);

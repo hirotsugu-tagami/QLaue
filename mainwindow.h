@@ -90,6 +90,7 @@ class MainWindow : public QMainWindow
 	
 	QString currentCrystalFilename;
 	QString currentWorkingDir;
+	QByteArray savedDocumentState;
 	QPrinter *printer;
 	
 	// PSL Camera
@@ -98,17 +99,22 @@ class MainWindow : public QMainWindow
 	
 	double currentZoom;
 	
-	void closeEvent(QCloseEvent *event);
+	void closeEvent(QCloseEvent *event) override;
 	bool maybeSave(void);
+	QByteArray documentState() const;
+	bool saveCrystalTo(const QString &filename);
+	void clearImage();
+	void importCrystal(bool cif);
 	void writeSettings(void);
 	void readSettings(void);
+	void preparePrinter(QPrinter::Orientation orientation);
 private slots:
 	void about(void);
 	void importImage(void);
 	void aquireImage(void);
 	void aquireImageDialog(void);
-	void saveCrystal(void);
-	void saveAsCrystal(void);
+	bool saveCrystal(void);
+	bool saveAsCrystal(void);
 	void open(void);
 	void openRecent(void);
 	void loadCrystal(QString filename);
@@ -116,6 +122,7 @@ private slots:
 	void printAction(void);
 	void pageSetupAction(void);
 	void displayUMatrixDialog(void);
+	void resetCrystalOrientation(void);
 	void displayPreferencesDialog(void);
 	void displayCrystalDialog(void);
 	void updateRecentFileActions();
@@ -150,7 +157,7 @@ private slots:
 	void rotateCrystal(double newX, double newY, double newZ);
 	void rotateCrystalBy(double newX, double newY, double newZ);
 	void reCalcAll(void);
-	void displayIndexingResults(int nOrientations, LaueOrientations *orientations);
+	void displayIndexingResults();
 	void displaySingleIndexingResult(int row, int col);
 	void displaySingleIndexingResult(void);
 	void clearIndexingResults(void);
@@ -159,13 +166,14 @@ private slots:
 	void aquireImageMessageDisplay(QString message);
 public:
 	MainWindow();
+	~MainWindow() override;
 private:
 	Ui::MainWindow ui;
 	void setupActions(void);
 	enum { MaxRecentFiles = 4 };
 	QAction *recentFileActs[MaxRecentFiles];
 protected:
-	void dropEvent(QDropEvent *event);
+	void dropEvent(QDropEvent *event) override;
 };
 
 #endif

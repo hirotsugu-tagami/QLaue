@@ -108,7 +108,7 @@ Matrix::~Matrix(){
 	delete [] data;
 }
 
-double Matrix::dot(Matrix other) {
+double Matrix::dot(Matrix other) const {
 	double dot = 0;
 	for(int i = 0 ; i < 3 ; i ++ ){
 		dot = dot + (Get(i,0) * other.Get(i,0));
@@ -276,7 +276,7 @@ void Matrix::identity(void) {
   
 }
 
-double Matrix::mag(void) {
+double Matrix::mag(void) const {
 	return pow(pow(data[0],2) + pow(data[1],2) + pow(data[2],2),0.5);
 }
 

@@ -27,6 +27,8 @@
 #include <QtCore>
 #include <QtGui>
 #include <QtWidgets>
+#include <algorithm>
+#include <cmath>
 #include "lauewidget.h"
 #include "lauecontrols.h"
 
@@ -75,7 +77,7 @@ void LaueControls::charIntChanged(int newval){
 }
 
 void LaueControls::dChanged(void){
-	emit sampleFilmDChanged(ui.sampleFilmD->value());
+	if(ui.sampleFilmD->value() > 0) emit sampleFilmDChanged(ui.sampleFilmD->value());
 }
 
 void LaueControls::dValueChanged(double newval){
@@ -113,15 +115,33 @@ void LaueControls::simChanged(int newval){
 }
 
 void LaueControls::setAll(LaueFilm *film){
-	
+	const QSignalBlocker spot(ui.SpotSizeSpinBox), distance(ui.sampleFilmD);
+	const QSignalBlocker saturation(ui.SatLevelSpinBox), threshold(ui.DetLevelSpinBox);
+	const QSignalBlocker accuracy(ui.AccuracySpinBox);
+	const QSignalBlocker simulation(ui.ShowSimulationCheckbox), intensities(ui.ShowSimulationIntensities);
+	const QSignalBlocker characteristic(ui.ShowCharacteristicCheckBox), color(ui.IntensityFilmLikeCheckBox);
+	const QSignalBlocker spotSlider(ui.SpotSizeSlider), satSlider(ui.SatLevelSlider);
+	const QSignalBlocker detSlider(ui.DetLevelSlider), accuracySlider(ui.AccuracySlider);
 	ui.SpotSizeSpinBox->setValue(film->getSpotSize());
+	ui.SpotSizeSlider->setValue(ui.SpotSizeSpinBox->value());
+	ui.sampleFilmD->setMaximum(std::max(ui.sampleFilmD->maximum(), film->getLaue()->getDistance()));
 	ui.sampleFilmD->setValue(film->getLaue()->getDistance());
-	ui.SatLevelSpinBox->setValue((int)(film->getLaue()->getDetSatLevel() * 100));
-	ui.DetLevelSpinBox->setValue((int)(film->getLaue()->getDetLevel() * 100));
+	ui.SatLevelSpinBox->setValue(std::lround(film->getLaue()->getDetSatLevel() * 100 + 1e-9));
+	ui.SatLevelSlider->setValue(ui.SatLevelSpinBox->value());
+	ui.DetLevelSpinBox->setValue(std::lround(film->getLaue()->getDetLevel() * 100 + 1e-9));
+	ui.DetLevelSlider->setValue(ui.DetLevelSpinBox->value());
 	ui.AccuracySpinBox->setValue(film->getAccuracy());
+	ui.AccuracySlider->setValue(ui.AccuracySpinBox->value());
 	ui.ShowSimulationCheckbox->setChecked(film->getDisplayLaue());
 	ui.ShowSimulationIntensities->setChecked(film->getDisplayIntensities());
 	ui.ShowCharacteristicCheckBox->setChecked(film->getDisplayCharacteristicInt());
 	ui.IntensityFilmLikeCheckBox->setChecked(film->getDisplayIntensitiesAsColor());
+	const bool enabled = ui.ShowSimulationIntensities->isChecked();
+	ui.DetLevelSpinBox->setEnabled(enabled);
+	ui.SatLevelSpinBox->setEnabled(enabled);
+	ui.DetLevelSlider->setEnabled(enabled);
+	ui.SatLevelSlider->setEnabled(enabled);
+	ui.ShowCharacteristicCheckBox->setEnabled(enabled);
+	ui.IntensityFilmLikeCheckBox->setEnabled(enabled);
 
 }
