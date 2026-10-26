@@ -177,20 +177,33 @@ static void calibrationChecks() {
     qInfo("PASS: scale validation, fractional DPI/pixel size and safe bidirectional width measurement");
 }
 
-static QPointF colorCenter(const QImage &image, bool blue) {
+static QImage grabImage(LaueFilm &film) {
+    const QPixmap pixmap=film.grab();
+    QImage image=pixmap.toImage();
+    image.setDevicePixelRatio(pixmap.devicePixelRatio());
+    return image;
+}
+
+static QPointF colorCenter(const QImage &image, bool blue, const QRect &logicalArea=QRect()) {
     double xs=0,ys=0,count=0;
-    for(int y=0;y<image.height();++y) for(int x=0;x<image.width();++x) {
+    const QRect area=logicalArea.isNull() ? image.rect() :
+        QTransform::fromScale(image.devicePixelRatio(),image.devicePixelRatio())
+            .mapRect(QRectF(logicalArea)).toAlignedRect().intersected(image.rect());
+    for(int y=area.top();y<=area.bottom();++y) for(int x=area.left();x<=area.right();++x) {
         const QRgb p=image.pixel(x,y);
+        // The green fixture is flat. The antialiased origin has no pure-blue
+        // pixels at DPR 1, so restrict its coverage mask to the feature area.
         const bool match=blue ? qBlue(p)>qRed(p)+40 && qBlue(p)>qGreen(p)+40
-                              : qGreen(p)>qRed(p)+40 && qGreen(p)>qBlue(p)+40;
+                              : p==qRgb(0,160,0);
         if(match) { xs+=x; ys+=y; ++count; }
     }
     require(count>0,"Missing calibration marker");
-    return QPointF(xs/count,ys/count);
+    // Widget mouse events and comparison tolerances use logical pixels.
+    return QPointF(xs/count,ys/count)/image.devicePixelRatio();
 }
 
 static bool hasCalculatedSpot(const QImage &image) {
-    for(int y=50;y<image.height();++y) for(int x=0;x<image.width();++x)
+    for(int y=qRound(50*image.devicePixelRatio());y<image.height();++y) for(int x=0;x<image.width();++x)
         if(image.pixel(x,y)==qRgb(255,0,0)) return true;
     return false;
 }
@@ -214,11 +227,11 @@ static void originCalibrationChecks() {
     };
     for(bool simulation : {true,false}) {
         film.setDisplayLaue(simulation);
-        const QImage before=film.grab().toImage();
+        const QImage before=grabImage(film);
         require(hasCalculatedSpot(before)==simulation,"Simulation visibility fixture is invalid");
         film.setOrigin();
         mouse(film,QEvent::MouseMove,QPoint(220,150),Qt::NoButton);
-        require(!hasCalculatedSpot(film.grab().toImage()),"Origin selection did not temporarily hide the simulation");
+        require(!hasCalculatedSpot(grabImage(film)),"Origin selection did not temporarily hide the simulation");
         require(film.originX()==12 && film.originY()==-8,"Origin preview changed committed calibration");
         QKeyEvent bigger(QEvent::KeyPress,Qt::Key_Up,Qt::NoModifier);
         QApplication::sendEvent(&film,&bigger);
@@ -226,10 +239,10 @@ static void originCalibrationChecks() {
         require(film.originX()==12 && film.originY()==-8 && film.getDisplayLaue()==simulation &&
                 film.cursor().shape()==Qt::PointingHandCursor && !film.hasMouseTracking(),
                 "Origin cancel did not restore state");
-        require(film.grab().toImage()==before,"Origin cancel changed the displayed result");
+        require(grabImage(film)==before,"Origin cancel changed the displayed result");
 
         film.measureScale();
-        require(!hasCalculatedSpot(film.grab().toImage()),"Scale measurement did not temporarily hide the simulation");
+        require(!hasCalculatedSpot(grabImage(film)),"Scale measurement did not temporarily hide the simulation");
         mouse(film,QEvent::MouseButtonPress,QPoint(200,150));
         mouse(film,QEvent::MouseMove,QPoint(400,150));
         escape();
@@ -238,42 +251,51 @@ static void originCalibrationChecks() {
         mouse(film,QEvent::MouseButtonRelease,QPoint(400,150));
         require(film.scale()==5 && film.originX()==12 && film.originY()==-8 &&
                 film.getDisplayLaue()==simulation && !film.hasMouseTracking() &&
-                film.cursor().shape()==Qt::PointingHandCursor && film.grab().toImage()==before,
+                film.cursor().shape()==Qt::PointingHandCursor && grabImage(film)==before,
                 "Scale cancel or subsequent release changed state");
 
         film.setOrigin(); mouse(film,QEvent::MouseMove,QPoint(220,150),Qt::NoButton);
         film.measureScale(); film.setOrigin(); escape();
-        require(film.originX()==12 && film.originY()==-8 && film.grab().toImage()==before &&
+        require(film.originX()==12 && film.originY()==-8 && grabImage(film)==before &&
                 !film.hasMouseTracking(),"Switching calibration tools retained a preview or temporary state");
 
         for(int tool=0;tool<3;++tool) {
             if(tool==0) {
                 film.solveOrientation();
-                require(!hasCalculatedSpot(film.grab().toImage()),"Spot selection did not temporarily hide the simulation");
+                require(!hasCalculatedSpot(grabImage(film)),"Spot selection did not temporarily hide the simulation");
             }
             else if(tool==1) film.setOrientation();
             else film.rotateAboutAxis();
             film.setOrigin(); mouse(film,QEvent::MouseMove,QPoint(220,150),Qt::NoButton); escape();
             require(film.getDisplayLaue()==simulation && film.cursor().shape()==Qt::PointingHandCursor &&
-                    !film.hasMouseTracking() && film.grab().toImage()==before,
+                    !film.hasMouseTracking() && grabImage(film)==before,
                     "A previous selection tool leaked its cursor or display state into calibration");
         }
     }
 
     // Pick an actual image feature, then change calibration through all three UI routes.
     film.setDisplayLaue(false);
-    const QPoint marker=colorCenter(film.grab().toImage(),false).toPoint();
+    const QImage featureImage=grabImage(film);
+    const QPoint marker=colorCenter(featureImage,false).toPoint();
+    qInfo()<<"Origin feature: widget"<<film.size()<<"image"<<featureImage.size()
+           <<"DPR"<<featureImage.devicePixelRatio()<<"logical click"<<marker;
     film.solveOrientation(); film.setOrigin(); mouse(film,QEvent::MouseButtonPress,marker);
-    const QImage before=film.grab().toImage();
-    const QPointF beam=colorCenter(before,true);
+    const QImage before=grabImage(film);
+    const QRect beamArea(marker-QPoint(60,60),QSize(121,121));
+    const QPointF beam=colorCenter(before,true,beamArea);
+    qInfo()<<"Origin selection: image"<<before.size()<<"DPR"<<before.devicePixelRatio()
+           <<"logical beam"<<beam<<"feature"<<colorCenter(before,false)
+           <<"error"<<QLineF(beam,colorCenter(before,false)).length();
     require(QLineF(beam,colorCenter(before,false)).length()<2,"Initial beam selection missed the image feature");
     const QPointF pixelOffset(film.originX()*film.scale(),film.originY()*film.scale());
     auto unchangedBeam=[&] {
         require(QLineF(pixelOffset,QPointF(film.originX()*film.scale(),film.originY()*film.scale())).length()<1e-9,
                 "Scale calibration moved the selected beam pixel");
-        const QImage view=film.grab().toImage();
-        require(QLineF(beam,colorCenter(view,true)).length()<1 &&
-                QLineF(colorCenter(view,true),colorCenter(view,false)).length()<2,
+        const QImage view=grabImage(film);
+        qInfo()<<"Calibrated origin: image"<<view.size()<<"DPR"<<view.devicePixelRatio()
+               <<"logical beam"<<colorCenter(view,true,beamArea)<<"feature"<<colorCenter(view,false);
+        require(QLineF(beam,colorCenter(view,true,beamArea)).length()<1 &&
+                QLineF(colorCenter(view,true,beamArea),colorCenter(view,false)).length()<2,
                 "Calibrated beam marker no longer overlays the imported image feature");
         require(!film.getDisplayLaue() && !film.hasMouseTracking(),"Calibration changed the user's display/input state");
     };
@@ -345,19 +367,19 @@ static void dragAndLabelChecks() {
         spot->setHKL(10+i,0,0);
         mouse(film,QEvent::MouseButtonPress,center,Qt::LeftButton,Qt::ShiftModifier);
     }
-    const QImage lastAccepted=film.grab().toImage().copy(labelArea);
+    const QImage lastAccepted=film.grab(labelArea).toImage();
     spot->setHKL(1000,0,0);
     for(int i=0;i<250;++i) {
         spot->setHKL(1000+i,0,0);
         mouse(film,QEvent::MouseButtonPress,center,Qt::LeftButton,Qt::ShiftModifier);
     }
-    const QImage refused=film.grab().toImage().copy(labelArea);
+    const QImage refused=film.grab(labelArea).toImage();
     film.resetLabels();
-    require(film.grab().toImage().copy(labelArea)==refused,"Label overflow should refuse extra labels");
+    require(film.grab(labelArea).toImage()==refused,"Label overflow should refuse extra labels");
     spot->setHKL(208,0,0);
-    require(film.grab().toImage().copy(labelArea)!=lastAccepted,"The last in-bounds label was not retained");
+    require(film.grab(labelArea).toImage()!=lastAccepted,"The last in-bounds label was not retained");
     mouse(film,QEvent::MouseButtonPress,center,Qt::LeftButton,Qt::ShiftModifier);
-    require(film.grab().toImage().copy(labelArea)==lastAccepted,"Clearing labels did not allow additions again");
+    require(film.grab(labelArea).toImage()==lastAccepted,"Clearing labels did not allow additions again");
     qInfo("PASS: finite signed drags and 199 persistent labels with safe overflow/reset");
 }
 
