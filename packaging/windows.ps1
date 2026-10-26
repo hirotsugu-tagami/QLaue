@@ -32,9 +32,9 @@ $env:QT_FORCE_STDERR_LOGGING = '1'
 & ./build-image_state/release/image-state-check.exe
 & ./build-settings_regressions/release/settings-regressions-check.exe
 & ./build-lattice_constraints/release/lattice-constraints-check.exe
-& ./build-camera/release/camera-check.exe
 & ./build-app_controls/release/app-controls-check.exe
 & ./build-print_alignment/release/print-alignment-check.exe ./build-print_alignment/output
+& ./build-camera/release/camera-check.exe
 Remove-Item env:QT_QPA_PLATFORM
 
 $payload = (New-Item -ItemType Directory -Force dist/windows).FullName

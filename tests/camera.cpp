@@ -7,7 +7,6 @@
 #include <QElapsedTimer>
 #include <QTimer>
 #include <QThread>
-#include <QPointer>
 #include <QCoreApplication>
 #include <QLineEdit>
 #include <QSpinBox>
@@ -69,12 +68,18 @@ public:
                         return;
                     }
                     if(fragment) {
-                        for(int i=0;i<reply.size();++i) {
-                            QPointer<QTcpSocket> target=socket;
-                            QTimer::singleShot(i,this,[target,reply,i] {
-                                if(target && target->state()==QAbstractSocket::ConnectedState) target->write(reply.mid(i,1));
-                            });
-                        }
+                        // Independent per-byte timers can fire out of order on Windows.
+                        QTimer *timer=new QTimer(socket);
+                        timer->setTimerType(Qt::PreciseTimer);
+                        int offset=0;
+                        QObject::connect(timer,&QTimer::timeout,timer,[socket,timer,reply,offset]() mutable {
+                            if(socket->state()!=QAbstractSocket::ConnectedState) {
+                                timer->stop(); timer->deleteLater(); return;
+                            }
+                            require(socket->write(reply.mid(offset,1))==1,"mock writes each fragmented byte");
+                            if(++offset==reply.size()) { timer->stop(); timer->deleteLater(); }
+                        });
+                        timer->start(1);
                     } else socket->write(reply);
                 });
             }
@@ -94,6 +99,7 @@ static void receiveChecks() {
     server.image=frame(2,2,raw); server.fragment=true;
     camera.getImage(); require(spin([&] {return camera.isFinished();}),"fragmented acquisition completes");
     require(successes==1 && errors==0,"fragmented frame succeeded");
+    std::cout<<"PASS: ordered one-byte fragmented camera frame\n";
     QImage image=camera.getNewImage();
     require(image.size()==QSize(2,2) && qRed(image.pixel(0,0))==0 && qRed(image.pixel(1,1))==255,"16-bit little-endian pixel normalization");
     require(server.commands==QStringList({"SetBinning;2;2","SetExposure;10","Snap","GetImage"}),"original command protocol preserved");
