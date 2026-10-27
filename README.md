@@ -11,8 +11,8 @@ and Windows.
 
 | Platform | Installer | Installation |
 | --- | --- | --- |
-| Windows 10/11, x64 | [QLaue-windows-x64-setup.exe](https://github.com/hirotsugu-tagami/QLaue/releases/download/preview-2026-10-26-r3/QLaue-windows-x64-setup.exe) | Run the setup wizard, then open QLaue from the Start menu. |
-| macOS, Apple Silicon | [QLaue-macos-arm64.dmg](https://github.com/hirotsugu-tagami/QLaue/releases/download/preview-2026-10-26-r3/QLaue-macos-arm64.dmg) | Open the disk image and drag QLaue.app to Applications. |
+| Windows 10/11, x64 | [QLaue-windows-x64-setup.exe](https://github.com/hirotsugu-tagami/QLaue/releases/download/preview-2026-10-27/QLaue-windows-x64-setup.exe) | Run the setup wizard, then open QLaue from the Start menu. |
+| macOS, Apple Silicon | [QLaue-macos-arm64.dmg](https://github.com/hirotsugu-tagami/QLaue/releases/download/preview-2026-10-27/QLaue-macos-arm64.dmg) | Open the disk image and drag QLaue.app to Applications. |
 
 Save your analysis and close the old application before upgrading. Qt and the
 required runtime libraries are included; no separate Qt, Conda or Python
@@ -21,7 +21,7 @@ without administrator privileges and provides an uninstaller. The macOS build
 is for Apple Silicon (arm64), with a macOS 11.0 deployment target, checked on
 macOS 26.7.1. An Intel Mac build is not included.
 
-See the [release notes and checksums](https://github.com/hirotsugu-tagami/QLaue/releases/tag/preview-2026-10-26-r3)
+See the [release notes and checksums](https://github.com/hirotsugu-tagami/QLaue/releases/tag/preview-2026-10-27)
 for the source revision and validation details.
 
 These are **prereleases**. The [current fix record](docs/FIXES-2026-10-26-APP-FUNCTIONS.md)
@@ -91,18 +91,20 @@ is a separate step. For a local build with the same tools, run
 `pwsh -File packaging/windows.ps1` with Qt 5 on `PATH` and its matching source
 modules in the adjacent `Src` directory (for license notices).
 
-On macOS, prepare a directory containing the deployed and signed `QLaue.app`,
-`README.txt`, `LICENSE-QLaue.txt`, `build-manifest.json`, and `licenses/` with the
-runtime notices. Include dependency build recipes and patches when applicable.
-Then run:
+On macOS, prepare a deployed `QLaue.app` and put `README.txt`,
+`LICENSE-QLaue.txt`, `build-manifest.json`, `licenses/`, `build-recipes/`, and
+`docs/` inside `QLaue.app/Contents/Resources/Distribution/`. Include the
+dependency notices, build recipes and patches. Sign the app after adding these
+files, and then run:
 
 ```sh
 bash packaging/macos-dmg.sh dist/macos-payload dist/installers/QLaue-macos-arm64.dmg
 ```
 
-The script creates and verifies a compressed disk image with an Applications
-shortcut. Verify a mounted copy and its startup before publishing the `.dmg`
-and `.exe` together with their checksums as GitHub Release assets.
+The script creates and verifies a compressed disk image with a Finder window
+showing the app and Applications shortcut. The documents remain inside the app
+after installation. Verify a mounted copy and its startup before publishing the
+`.dmg` and `.exe` together with their checksums as GitHub Release assets.
 
 ## Image Import and Checks
 
