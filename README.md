@@ -11,8 +11,8 @@ and Windows.
 
 | Platform | Installer | Installation |
 | --- | --- | --- |
-| Windows 10/11, x64 | [QLaue-windows-x64-setup.exe](https://github.com/hirotsugu-tagami/QLaue/releases/download/preview-2026-10-27/QLaue-windows-x64-setup.exe) | Run the setup wizard, then open QLaue from the Start menu. |
-| macOS, Apple Silicon | [QLaue-macos-arm64.dmg](https://github.com/hirotsugu-tagami/QLaue/releases/download/preview-2026-10-27/QLaue-macos-arm64.dmg) | Open the disk image and drag QLaue.app to Applications. |
+| Windows 10/11, x64 | [QLaue-windows-x64-setup.exe](https://github.com/hirotsugu-tagami/QLaue/releases/download/preview-2026-11-17/QLaue-windows-x64-setup.exe) | Run the setup wizard, then open QLaue from the Start menu. |
+| macOS, Apple Silicon | [QLaue-macos-arm64.dmg](https://github.com/hirotsugu-tagami/QLaue/releases/download/preview-2026-11-17/QLaue-macos-arm64.dmg) | Open the disk image and drag QLaue.app to Applications. |
 
 Save your analysis and close the old application before upgrading. Qt and the
 required runtime libraries are included; no separate Qt, Conda or Python
@@ -21,7 +21,7 @@ without administrator privileges and provides an uninstaller. The macOS build
 is for Apple Silicon (arm64), with a macOS 11.0 deployment target, checked on
 macOS 26.7.1. An Intel Mac build is not included.
 
-See the [release notes and checksums](https://github.com/hirotsugu-tagami/QLaue/releases/tag/preview-2026-10-27)
+See the [release notes and checksums](https://github.com/hirotsugu-tagami/QLaue/releases/tag/preview-2026-11-17)
 for the source revision and validation details.
 
 These are **prereleases**. The [current fix record](docs/FIXES-2026-10-26-APP-FUNCTIONS.md)
@@ -107,6 +107,10 @@ after installation. Verify a mounted copy and its startup before publishing the
 `.dmg` and `.exe` together with their checksums as GitHub Release assets.
 
 ## Image Import and Checks
+
+The image-free startup view uses a default pixel size of 172 microns to show
+the simulated pattern. Imported images initially inherit the current scale;
+calibrate an experimental image using its actual pixel size or a known width.
 
 Use **Laue > Import Image** to open a bitmap. The image picker lists formats
 supported by the running Qt installation, including BMP, and provides **All

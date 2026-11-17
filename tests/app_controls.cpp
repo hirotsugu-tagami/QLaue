@@ -18,6 +18,46 @@ static double difference(const Matrix &a,const Matrix &b) {
         result=std::max(result,std::abs(a.Get(row,column)-b.Get(row,column)));
     return result;
 }
+static void startupScaleChecks(MainWindow &window) {
+    auto *film=window.findChild<LaueFilm *>();
+    require(film && film->importedImage->isNull(),"Startup should begin without an image");
+    require(std::abs(film->scale()-1000.0/172.0)<1e-12,"MainWindow startup overwrote the empty-view scale");
+    QElapsedTimer timer; timer.start();
+    while(film->getLaue()->isCalculating() && timer.elapsed()<10000) {
+        QCoreApplication::processEvents(QEventLoop::AllEvents,20);
+    }
+    require(!film->getLaue()->isCalculating(),"Startup calculation did not finish");
+    const QImage image=film->grab().toImage();
+    const qreal dpr=image.devicePixelRatio();
+    const QRect viewport(10,50,film->width()-20,film->height()-60);
+    const QPoint center=viewport.center();
+    bool visibleReflection=false;
+    for(int i=0;i<film->getLaue()->getNspots();++i) {
+        auto *spot=film->getLaue()->getSpot(i);
+        if(spot->detI()<=0) continue;
+        const QPoint p=center+QPoint(qRound(spot->X()*film->scale()),qRound(-spot->Y()*film->scale()));
+        if(!viewport.adjusted(10,10,-10,-10).contains(p) || QLineF(center,p).length()<10) continue;
+        const QPoint sample(qRound(p.x()*dpr),qRound(p.y()*dpr));
+        for(int y=sample.y()-3;y<=sample.y()+3 && !visibleReflection;++y)
+            for(int x=sample.x()-3;x<=sample.x()+3;++x) {
+                if(!image.rect().contains(x,y)) continue;
+                const QColor color=image.pixelColor(x,y);
+                const bool red=color.red()>200 && color.green()<180 && color.blue()<180;
+                const bool blue=color.blue()>70 && color.blue()>color.red()*1.2 && color.blue()>color.green()*1.2;
+                if(red || blue) { visibleReflection=true; break; }
+            }
+        if(visibleReflection) break;
+    }
+    require(visibleReflection,"Startup view did not draw any off-center calculated reflection");
+    QImage loaded(17,13,QImage::Format_RGB32); loaded.fill(Qt::white);
+    film->setImage(loaded,true);
+    require(std::abs(film->scale()-1000.0/172.0)<1e-12,"Image import did not retain the current scale");
+    film->setScale(7.25); film->resetView();
+    require(film->scale()==100,"Reset with an imported image changed its existing behavior");
+    QImage empty; film->setImage(empty,false); film->resetView();
+    require(std::abs(film->scale()-1000.0/172.0)<1e-12,"Reset without an image did not restore the initial scale");
+    qInfo("PASS: application startup draws off-center reflections and empty/image resets use their expected scales");
+}
 static void orientationChecks(MainWindow &window) {
     auto *film=window.findChild<LaueFilm *>();
     auto *crystal=film->getCrystal();
@@ -123,5 +163,5 @@ int main(int argc,char **argv) {
     QSettings::setPath(QSettings::IniFormat,QSettings::UserScope,settings.path());
     QCoreApplication::setOrganizationName("QLaueTests");QCoreApplication::setApplicationName("AppControls");
     MainWindow window;window.setMaximumSize(2000,1400);window.resize(1600,1100);window.show();pump();
-    orientationChecks(window);dockChecks(window);
+    startupScaleChecks(window);orientationChecks(window);dockChecks(window);
 }

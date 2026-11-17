@@ -323,7 +323,7 @@ static void originCalibrationChecks() {
     require(film.originX()==7.25 && film.originY()==-4.125,"Raw state restoration rescaled the origin");
     film.setOrigin(); mouse(film,QEvent::MouseMove,QPoint(220,150),Qt::NoButton);
     QImage empty; film.setImage(empty,false); film.resetView(); escape();
-    require(film.originX()==0 && film.originY()==0 && film.scale()==100,
+    require(film.originX()==0 && film.originY()==0 && std::abs(film.scale()-1000.0/172.0)<1e-12,
             "A canceled tool restored calibration from the previous image");
     qInfo("PASS: origin preview/cancel/restart, tool switching and fixed beam pixels across scale/DPI/width changes");
 }

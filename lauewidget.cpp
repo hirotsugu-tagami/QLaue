@@ -42,6 +42,9 @@
 #include "setubmat.h"
 #include "adjustimage.h"
 
+// Default detector sampling: 172 microns per pixel (PSL with 2x2 binning).
+static const double defaultPixelsPerMm = 1000.0 / 172.0;
+
 #ifdef CALC_IN_THREAD
 
 LaueIndexingThread::LaueIndexingThread(QObject *parent) : QThread(parent), lauegram() {}
@@ -189,7 +192,7 @@ LaueFilm::LaueFilm(QWidget *parent, Crystal* c)
 	laueOrigin = QPointF(0,0);
 	origin_circle = 0.5;
 
-	pixels_per_mm = 1000.0 / 172; // This is approximately 172 micron pixel size for PSL (2 x 2 binning)
+	pixels_per_mm = defaultPixelsPerMm;
 	rubberBand = 0;
 	
 	max_spot_size = 50;
@@ -1328,7 +1331,9 @@ void LaueFilm::resetView(void){
 	finishTool(false);
 	const bool movedOrigin = !laueOrigin.isNull();
 	laueOrigin = QPointF(0,0);
-	setScale(100);
+	// An empty view uses the same default scale as a newly constructed film.
+	// Keep the existing image-reset behavior for an imported image.
+	setScale(importedImage->isNull() ? defaultPixelsPerMm : 100.0);
 	if(movedOrigin) clearOrientation();
 	update();
 }
